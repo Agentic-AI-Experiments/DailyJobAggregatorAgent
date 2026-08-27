@@ -36,6 +36,7 @@ const NEW_JOBS_FILE = path.join(STATE_DIR, 'new-jobs.json');
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has('--dry-run');
 const SKIP_EMAIL = args.has('--skip-email');
+const MERGE_ONLY = args.has('--merge-only');
 const sourceArg = [...args].find(a => a.startsWith('--source='));
 const SOURCE_FILTER = sourceArg
   ? new Set(sourceArg.slice('--source='.length).split(',').map(s => s.trim()))
@@ -176,11 +177,38 @@ async function main() {
     return;
   }
 
-  // 1) Run each source
   const scrapeResults = [];
-  for (const entry of sources) {
-    const r = await scrapeSource(entry);
-    scrapeResults.push({ name: entry.name, ...r });
+
+  // 1) Run each source in parallel (Promise.all over independent scrapers).
+  // Each source writes to its own state/v2-sources/<name>.json; the orchestrator
+  // loads them all at the end. Parallel execution means LinkedIn's ~66s doesn't
+  // block the other 6 sources from finishing in ~3-5s. Wall-clock bound = slowest
+  // source, not the sum.
+  //
+  // --merge-only: skip scraping entirely; load whatever is already in
+  // state/v2-sources/*.json and proceed straight to merge/dedup/email. This is
+  // how the cron agent uses the orchestrator after spawning 7 parallel sub-agents
+  // (one per source) that each ran `node src/orchestrate.js --source=<name>
+  // --skip-email` independently.
+  if (!MERGE_ONLY) {
+    await Promise.all(
+      sources.map(async (entry) => {
+        const r = await scrapeSource(entry);
+        scrapeResults.push({ name: entry.name, ...r });
+      })
+    );
+  } else {
+    log('info', 'merge-only mode: skipping scrape, reading state/v2-sources/*.json');
+    scrapeResults.push(...sources.map((entry) => {
+      const file = path.join(STATE_DIR, 'v2-sources', `${entry.name}.json`);
+      if (!fs.existsSync(file)) return { name: entry.name, ok: false, count: 0, sample: [], error: 'no source file' };
+      try {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return { name: entry.name, ok: true, count: (data.jobs || []).length, sample: (data.jobs || []).slice(0, 5) };
+      } catch (e) {
+        return { name: entry.name, ok: false, count: 0, sample: [], error: e.message };
+      }
+    }));
   }
 
   // 2) Load raw jobs from per-source files
