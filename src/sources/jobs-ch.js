@@ -18,9 +18,20 @@ const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const ENT = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
 const stripHtml = (s) => (s || '')
-  .replace(/<br\s*\/?\s*>/gi, ' ').replace(/<[^>]{1,200}>/g, ' ').replace(/&nbsp;/g, ' ')
+  // Convert <br> and </p> to newlines BEFORE stripping tags so the card
+  // splits on line boundaries that match the original DOM. Without this,
+  // the entire <a data-cy="job-link">...</a> block becomes a single line
+  // and parseCard's lines[0] is the opening tag, not the date.
+  .replace(/<br\s*\/?\s*>/gi, '\n')
+  .replace(/<\/p\s*>/gi, '\n')
+  .replace(/<\/div\s*>/gi, '\n')
+  .replace(/<\/li\s*>/gi, '\n')
+  .replace(/<[^>]{1,200}>/g, ' ')
+  .replace(/&nbsp;/g, ' ')
   .replace(/&(?:amp|lt|gt|quot|#39);/g, (m) => ENT[m])
-  .replace(/&#\d+;/g, ' ').replace(/\s+/g, ' ').trim();
+  .replace(/&#\d+;/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 const snippet = (html) => stripHtml(html).slice(0, 4000);
 
 // ─── parseDate (verbatim from v1 daily-job-search.js) ───────────────────────

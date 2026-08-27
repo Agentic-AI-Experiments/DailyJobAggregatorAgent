@@ -91,12 +91,17 @@ async function loadSourceModule(manifestEntry) {
 
 // ─── Per-source scrape ────────────────────────────────────────────────────────
 async function scrapeSource(manifestEntry) {
+  const fullManifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
   const ctx = {
     logger: log,
     dryRun: DRY_RUN,
     sourceName: manifestEntry.name,
     outputPath: path.join(STATE_DIR, 'v2-sources', `${manifestEntry.name}.json`),
-    manifest: manifestEntry,
+    // Source modules expect ctx.manifest to be the full manifest file
+    // (with a .sources array) so they can look up their own entry by name.
+    // This matches the contract the source sub-agents were given.
+    manifest: fullManifest,
+    thisSource: manifestEntry,        // the single entry for convenience
   };
   log('info', 'source start', { source: manifestEntry.name, method: manifestEntry.method });
   const startedAt = Date.now();
