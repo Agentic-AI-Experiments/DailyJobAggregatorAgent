@@ -68,14 +68,33 @@ or contact the project owner through a non-public channel.
 | ictcareer.ch | MCP `web_fetch` listing only | Detail pages Turnstile-blocked |
 | jobup.ch | MCP `web_fetch` | Inline JSON-LD |
 
+## Cron
+
+Registered with the OpenClaw gateway as `job-aggregator-v2`:
+
+- **Cron ID:** `100ecddc-38ce-4327-9a08-428fa7c71ba7`
+- **Schedule:** `0 9 * * *` Europe/Zurich
+- **`sessionTarget`:** `isolated`
+- **`enabled`:** `false` (manual trigger from chat, matching the v1 pattern)
+- **Manual trigger:** `cron run --id 100ecddc-38ce-4327-9a08-428fa7c71ba7 --force`
+
+The cron agent reads the README, runs `node src/orchestrate.js`, and reports a brief summary. It does not modify files.
+
 ## Roadmap
 
 - [x] **Phase 1** — Scaffold + gitignore + secrets + README + first commit
-- [ ] **Phase 2** — 7 source scrapers via parallel sub-agents + per-source dry-run
-- [ ] **Phase 3** — Orchestrator + filters + utils + email (3 parallel sub-agents)
-- [ ] **Phase 4** — End-to-end dry-run
-- [ ] **Phase 5** — Live send test (1 source, then full)
-- [ ] **Phase 6** — Cron registration + first push + memory updates
+- [x] **Phase 2** — 7 source scrapers via parallel sub-agents + per-source dry-run
+- [x] **Phase 3** — Orchestrator + filters + utils + email (3 parallel sub-agents)
+- [x] **Phase 4** — End-to-end dry-run (catches ctx.manifest contract drift)
+- [x] **Phase 5** — Live send test (jobs.ch, Resend msgId `0a5c38dc-f9c5-45f0-b433-89895b572d48`, 10 jobs delivered)
+- [x] **Phase 6** — Cron registration + first push to public GitHub repo
+
+## Known follow-ups (not blockers)
+
+- jobs.ch title field is concatenated (multi-field string). Caused by the listing-card `<a>` wrapping multiple `<div>`s without `<br>`s between them. Fix: parse the `<span class="...lc_4">` title element directly instead of splitting card text. Link/company/location/date all parse correctly.
+- 6 remaining sources (`itjobs.ch`, `jobwinner.ch`, `linkedin.js`, `jobscout24.ch`, `ictcareer.ch`, `jobup.ch`) have not been live-tested yet. Phase 2/3 only verified `node --check` + per-source dry-run on jobs.ch.
+- jobs.ch date range goes back ~4 weeks (cutoff is 14 days, but jobs.ch lists older roles with "4 weeks ago" badges). May want to tune `CUTOFF_DAYS` if too many stale jobs come through.
+- `node_modules/` is a Windows junction to `~/.openclaw/workspace/scripts/node_modules/` (the v1 scripts dir). If forking to a fresh host, run `npm install` to replace the junction with a real `node_modules/`.
 
 ## License
 
