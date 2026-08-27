@@ -207,11 +207,11 @@ async function main() {
     log('info', 'email skipped (dry-run or --skip-email)', { jobs: newJobs.length });
   } else {
     const apiKey = secretFromEnvOrFile('RESEND_API_KEY');
-    const from = process.env.EMAIL_FROM || secretFromEnvOrFile('EMAIL_FROM') || 'onboarding@resend.dev';
+    const from = process.env.EMAIL_FROM || secretFromEnvOrFile('EMAIL_FROM');
     const to = process.env.EMAIL_RECIPIENT || secretFromEnvOrFile('EMAIL_RECIPIENT');
 
-    if (!apiKey || !to) {
-      log('error', 'email config missing', { hasApiKey: !!apiKey, hasTo: !!to });
+    if (!apiKey || !from || !to) {
+      log('error', 'email config missing', { hasApiKey: !!apiKey, hasFrom: !!from, hasTo: !!to });
     } else {
       const { subject, html } = renderDigest(newJobs);
       const res = await sendDigest({ subject, html, to, from, apiKey });
