@@ -1,36 +1,42 @@
 // src/utils/secrets.js
 // Env-first, secrets.md fallback. Pattern documented in secrets.md.
 //
+// SHARED SECRETS FILE: as of 2026-08-27, secrets live in ONE neutral file at
+//   ~/.openclaw/workspace/secrets.md
+// (OpenClaw workspace root, alongside other .md files). Both this project
+// and the daily-news-digest-agent read from it. Override with
+// OPENCLAW_SECRETS_MD env var for tests / multi-host setups.
+//
+// Why share: same value of RESEND_API_KEY, EMAIL_FROM, EMAIL_RECIPIENT is
+// needed across all OpenClaw crons on this host. Duplicating across each
+// project's secrets.md is a security liability (easy to leak on fork) and
+// a maintenance pain (rotating one key requires N edits). One canonical
+// file at a neutral location is simpler.
+//
 // v1 source: scripts/daily-job-search.js, top-of-file (L40–58 per audit):
 //   readPersonalMdKey + secretFromEnvOrFile, with a project-scoped secrets
-//   file. v2 uses the same env-first / file-fallback contract.
-//
-// v2 path: this module resolves secrets.md as a sibling of the project root
-// (relative to this file via __dirname), NOT via the v1 home-directory
-// location. Keeping secrets.md in the project root means the file travels
-// with the repo when forked and is covered by the daily personalisation
-// backup. The file is gitignored + restored from the backup archive (see
-// architecture.md §Security). Requirement: do not hard-code any host or
-// workspace path here.
+//   file. v2 uses the same env-first / file-fallback contract — only the
+//   resolved path changed.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// src/utils/secrets.js → ../../ = project root, then secrets.md.
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const SECRETS_MD = path.join(PROJECT_ROOT, 'secrets.md');
+// Default: the shared secrets file at the OpenClaw workspace root.
+// Override via OPENCLAW_SECRETS_MD env var for tests / multi-host setups.
+function getSecretsMdPath() {
+  return process.env.OPENCLAW_SECRETS_MD
+    || path.join(os.homedir(), '.openclaw', 'workspace', 'secrets.md');
+}
 
 // Read a single KEY=VALUE line from secrets.md. Case-insensitive key match,
 // optional double or single quotes around the value, ignores blank lines
 // and # comments. Returns trimmed value or null.
 function readSecretsMdKey(key) {
+  const secretsPath = getSecretsMdPath();
   try {
-    if (!fs.existsSync(SECRETS_MD)) return null;
-    const content = fs.readFileSync(SECRETS_MD, 'utf8');
+    if (!fs.existsSync(secretsPath)) return null;
+    const content = fs.readFileSync(secretsPath, 'utf8');
     // Anchored on each line so a stray substring match in free text is impossible.
     // The value group excludes ", ', \r, \n so quoted and unquoted forms both parse.
     const re = new RegExp(`^\\s*${key}\\s*=\\s*"?([^"'\\r\\n]+?)"?\\s*$`, 'mi');
