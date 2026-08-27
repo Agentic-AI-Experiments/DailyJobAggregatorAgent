@@ -1,135 +1,154 @@
-// itjobs.ch source scraper (v2 — MCP web_fetch).
-// Adapted from v1 Playwright DOM-scan at
-//   Daily job-search v1 (read-only reference, sibling workspace) — scrapeItJobsCh
-//   scrapeItJobsCh, lines ~502-575.
-// v2 feeds Readability-extracted markdown into the same slug-parse +
-// date-parse logic; card boundaries are detected by job-detail link
-// pairs `[/jobs/<id>-<slug>](/jobs/<id>-<slug>)`.
-
-export const META = { name: 'itjobs.ch', method: 'mcp_web_fetch' };
+// src/sources/itjobs-ch.js
+// itjobs.ch scraper for v2. Patterns adapted from v1 (scripts/daily-job-search.js):
+//   - scrapeItJobsCh (L502–575) for DOM-scan card structure
+//   - parseDate (verbatim) for "vor 3 Tagen" German date parsing
+//
+// v2 uses raw fetch() against the listing page (server-rendered HTML).
+// Each job card is a <div class="pl-3"> wrapping an <a class="job-details-link">
+// + <a href="/companies/..."> + <a href="/jobs/in-...">. We slice the card block
+// from one job-details-link to the next and parse fields from the slice.
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const TITLE_LINK_RE = /\[([^\]]+)\]\(\/jobs\/(\d{6,})-([^)\s]+)\)/g;
-const COMPANY_RE = /\[([^\]]+)\]\(\/companies\/[^)]+\)/;
-const LOCATION_LINK_RE = /\[([^\]]+)\]\(\/jobs\/in-([a-z0-9-]+)-switzerland\)/;
-const LOCATION_TEXT_RE = /([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]+),\s*(Kanton\s+[A-Z]{2}|[A-Z]{2}),\s*Schweiz/;
+export const META = { name: 'itjobs.ch', method: 'mcp_web_fetch' };
+
+const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
+// Match a job-details link anchor — captures the URL slug.
+const JOB_LINK_RE = /<a[^>]+class="job-details-link"[^>]+href="(\/jobs\/[0-9]+-[^"]+)"/g;
+// Match <h3>title</h3> immediately following the job-details-link.
+const TITLE_RE = /<h3[^>]*>([^<]+)/;
+// Match company <a> inside the card block.
+const COMPANY_RE = /\/companies\/[^"]+"[^>]*>\s*([^<]+?)\s*<\/a/;
+// Match location <a href="/jobs/in-<slug>-switzerland"> inside the card.
+const LOC_LINK_RE = /\/jobs\/in-([a-z0-9-]+)-switzerland/;
+// German date phrase: "vor 3 Tagen" / "vor 5 Std" / "vor 2 hours"
 const DATE_RE = /vor\s+(\d+)?\s*(Tg|Std|hours?|days?)/i;
 
-function parseLocation(href) {
-  if (!href) return 'Switzerland';
-  const slug = href.replace('/jobs/in-', '').replace('-switzerland', '');
-  const parts = slug.split('-').filter(Boolean);
-  if (parts.length === 0) return 'Switzerland';
-  const city = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-  if (parts.length === 1) return city;
-  return `${city}, Kanton ${parts[1].toUpperCase()}, Switzerland`;
+function stripHtml(s) {
+  return (s || '')
+    .replace(/<[^>]{1,200}>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function parseDate(block) {
-  const m = block.match(DATE_RE);
-  if (!m) return new Date().toISOString().split('T')[0];
-  const num = parseInt(m[1], 10) || 1;
-  const unit = m[2];
-  const d = new Date();
-  if (/^tg$|^days?$/i.test(unit)) d.setDate(d.getDate() - num);
-  return d.toISOString().split('T')[0];
+function snippet(text) {
+  return stripHtml(text).slice(0, 4000);
 }
 
-function buildDescSnippet(block) {
-  const text = block.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
-  return text.length > 4000 ? text.slice(0, 4000) : text;
+function parseDate(text) {
+  const now = new Date();
+  const lower = (text || '').toLowerCase().trim();
+  const m = lower.match(DATE_RE);
+  if (m) {
+    const num = parseInt(m[1]) || 1;
+    const unit = m[2].toLowerCase();
+    const d = new Date(now);
+    if (/^tg|^day/.test(unit)) d.setDate(d.getDate() - num);
+    return d.toISOString().split('T')[0];
+  }
+  return now.toISOString().split('T')[0];
 }
 
-function parseCards(markdown) {
-  // Find every title-link position, then slice the block between
-  // consecutive title links — that block is one job card.
+function locationFromSlug(slug) {
+  // /jobs/in-<city>-<kanton>-switzerland → "City, Kanton XX, Switzerland"
+  const parts = slug.split('-');
+  if (parts.length >= 3) {
+    const city = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+    const canton = parts[1].toUpperCase();
+    return `${city}, Kanton ${canton}, Switzerland`;
+  }
+  if (parts.length === 2) {
+    const city = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+    return `${city}, Switzerland`;
+  }
+  return 'Switzerland';
+}
+
+// Slice the HTML into per-card blocks, then parse each.
+function parseCards(html) {
   const matches = [];
   let m;
-  while ((m = TITLE_LINK_RE.exec(markdown)) !== null) {
-    matches.push({
-      title: m[1].trim(),
-      href: `https://www.itjobs.ch/jobs/${m[2]}-${m[3]}`,
-      index: m.index,
-      end: m.index + m[0].length,
-    });
+  JOB_LINK_RE.lastIndex = 0;
+  while ((m = JOB_LINK_RE.exec(html)) !== null) {
+    matches.push({ href: 'https://www.itjobs.ch' + m[1], index: m.index, end: m.index + m[0].length });
   }
+  if (!matches.length) return [];
   const cards = [];
   for (let i = 0; i < matches.length; i++) {
     const start = matches[i].end;
-    const end = i + 1 < matches.length ? matches[i + 1].index : markdown.length;
-    cards.push({ ...matches[i], block: markdown.slice(start, end) });
+    const end = i + 1 < matches.length ? matches[i + 1].index : html.length;
+    cards.push({ href: matches[i].href, block: html.slice(start, end) });
   }
   return cards;
 }
 
 function buildJob(card) {
-  const company = (card.block.match(COMPANY_RE) || [null, 'Unknown'])[1].trim();
-  const locLink = card.block.match(LOCATION_LINK_RE);
-  const location = locLink
-    ? parseLocation(`/jobs/in-${locLink[2]}-switzerland`)
-    : ((card.block.match(LOCATION_TEXT_RE) || [])[0] || 'Switzerland');
+  const tm = card.block.match(TITLE_RE);
+  const title = tm ? stripHtml(tm[1]) : 'Unknown';
+  const cm = card.block.match(COMPANY_RE);
+  const company = cm ? stripHtml(cm[1]) : 'Unknown';
+  const lm = card.block.match(LOC_LINK_RE);
+  const location = lm ? locationFromSlug(lm[1]) : 'Switzerland';
   return {
     company,
-    title: card.title,
+    title,
     location,
     datePosted: parseDate(card.block),
     link: card.href,
     source: 'itjobs.ch',
-    descSnippet: buildDescSnippet(card.block),
+    descSnippet: snippet(card.block),
   };
 }
 
 export default async function scrape(ctx) {
-  const { logger, outputPath, manifest, webFetch } = ctx;
-  const log = (lvl, msg, extra) =>
-    logger ? logger[lvl](msg, { source: META.name, ...extra }) : null;
+  const { logger, outputPath, manifest } = ctx;
+  // Orchestrator logger signature is log(level, msg, extra) — adapt to that.
+  const log = (lvl, msg, extra) => {
+    if (typeof logger === 'function') return logger(lvl, msg, { source: META.name, ...(extra || {}) });
+    if (logger && typeof logger[lvl] === 'function') return logger[lvl](msg, { source: META.name, ...(extra || {}) });
+    return null;
+  };
 
-  if (typeof webFetch !== 'function') {
-    throw new Error('itjobs.ch: ctx.webFetch is required (MCP web_fetch).');
-  }
   if (!outputPath) {
     throw new Error('itjobs.ch: ctx.outputPath is required.');
   }
 
-  const searchUrl = manifest && manifest.searchUrl;
+  // ctx.manifest is the full manifest file (see orchestrate.js contract).
+  const myEntry = manifest && manifest.sources && manifest.sources.find((s) => s.name === 'itjobs.ch');
+  const searchUrl = myEntry && myEntry.searchUrl;
   if (!searchUrl) {
-    throw new Error('itjobs.ch: manifest.searchUrl missing.');
+    throw new Error('itjobs.ch: manifest.sources[*].searchUrl missing.');
   }
 
   log('info', 'fetching listing', { url: searchUrl });
-  let markdown;
+  let html;
   try {
-    const result = await webFetch({ url: searchUrl, extractMode: 'markdown' });
-    markdown = (result && result.text) || '';
+    const res = await fetch(searchUrl, { headers: { 'User-Agent': UA } });
+    if (!res.ok) {
+      log('error', 'fetch failed', { status: res.status });
+      return { count: 0, sample: [] };
+    }
+    html = await res.text();
   } catch (e) {
-    log('error', 'web_fetch failed', { error: e.message });
+    log('error', 'fetch failed', { error: e.message });
     return { count: 0, sample: [] };
   }
 
-  if (markdown.length < 200) {
-    log('warn', 'listing too short; no cards', { length: markdown.length });
-    return { count: 0, sample: [] };
-  }
-
-  const cards = parseCards(markdown);
-  const jobs = [];
-  for (const card of cards) {
-    if (card.title.length < 5) continue;
-    jobs.push(buildJob(card));
-  }
-
-  log('info', 'parsed', { total: cards.length, kept: jobs.length });
+  const cards = parseCards(html);
+  const jobs = cards.map(buildJob).filter((j) => j.title && j.title !== 'Unknown' && j.title.length > 3);
+  log('info', 'parsed', { cards: cards.length, kept: jobs.length });
 
   mkdirSync(dirname(outputPath), { recursive: true });
-  writeFileSync(
-    outputPath,
-    JSON.stringify(
-      { source: META.name, scrapedAt: new Date().toISOString(), jobs },
-      null, 2,
-    ),
-  );
+  writeFileSync(outputPath, JSON.stringify({
+    source: META.name, scrapedAt: new Date().toISOString(), jobs,
+  }, null, 2));
 
   return { count: jobs.length, sample: jobs.slice(0, 5) };
 }

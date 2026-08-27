@@ -23,8 +23,9 @@ import { writeFile } from 'node:fs/promises';
 export const META = { name: 'jobscout24.ch', method: 'mcp_web_fetch_plus_raw_http' };
 
 const LISTING_URL = 'https://www.jobscout24.ch/de/jobs/productmanager/';
-const DETAIL_HREF_RE = /jobscout24.*\/job\/[a-f0-9-]+\//;
-const DETAIL_LINK_RE = /https?:\/\/[^\s"'<>]*jobscout24[^\s"'<>]*\/job\/[a-f0-9-]+\//g;
+// Detail URL pattern observed on the live listing: /de/job/<uuid>/
+const DETAIL_HREF_RE = /\/de\/job\/([a-f0-9-]+)\//g;
+const DETAIL_LINK_RE = /href="\/de\/job\/([a-f0-9-]+)\/"/g;
 
 const TITLE_RE = /"title":\s*"([^"]+)"/;
 const COMPANY_RE = /"hiringOrganization":\s*\{[^}]*?"name":\s*"([^"]+)"/;
@@ -84,11 +85,18 @@ function fetchRaw(url, timeoutMs = 15000) {
   });
 }
 
+const DETAIL_BASE = 'https://www.jobscout24.ch';
+
 function extractDetailUrls(listingHtml) {
   const seen = new Set();
+  // DETAIL_LINK_RE captures the href value (without the href=" wrapper).
   for (const m of listingHtml.match(DETAIL_LINK_RE) || []) {
-    const cleaned = m.replace(/&amp;/g, '&').replace(/["'<>]+$/, '');
-    if (DETAIL_HREF_RE.test(cleaned)) seen.add(cleaned);
+    // m is like href="/de/job/<uuid>/" — extract the quoted href value.
+    const hrefMatch = m.match(/href="([^"]+)"/);
+    if (!hrefMatch) continue;
+    const rel = hrefMatch[1];
+    if (!DETAIL_HREF_RE.test(rel)) continue;
+    seen.add(DETAIL_BASE + rel);
   }
   return [...seen].slice(0, 80);
 }

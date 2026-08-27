@@ -89,6 +89,31 @@ The cron agent reads the README, runs `node src/orchestrate.js`, and reports a b
 - [x] **Phase 5** — Live send test (jobs.ch, Resend msgId `0a5c38dc-f9c5-45f0-b433-89895b572d48`, 10 jobs delivered)
 - [x] **Phase 6** — Cron registration + first push to public GitHub repo
 
+## Live test results (2026-08-27, end-to-end full run)
+
+| Source | Method | Count | Time | Notes |
+|---|---|---|---|---|
+| jobs.ch | raw `node:https` | 20 | ~2s | Server-rendered HTML, JSON-LD on detail. |
+| itjobs.ch | built-in `fetch()` | 30 | ~1.5s | Server-rendered, regex on `<a class="job-details-link">`. |
+| jobwinner.ch | raw HTTP fallback (MCP browser recipe in code) | 10 | ~0.6s | SPA — server-rendered SSR shell exposes the top 10 only. |
+| linkedin | Playwright subprocess | 360 | ~66s | 6 keywords serial. |
+| jobscout24.ch | raw `node:http` (listing) + JSON-LD regex (detail) | 12-13 | ~1s | Two-phase scrape. |
+| ictcareer.ch | built-in `fetch()` | 27 | ~1.3s | Listing only (detail = Turnstile-blocked). |
+| jobup.ch | built-in `fetch()` + JSON-LD | 99 | ~0.7s | 5 pages. |
+| **Total raw** | | **~558** | **~73s** | |
+| **PM-filtered** | | **~278** | | Restrictive default — only PM-positive titles. |
+
+End-to-end live email sent: **278 jobs delivered to sam.premium.token@gmail.com, Resend msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`**.
+
+## Known follow-ups
+
+- **German PM titles missed by the filter.** jobscout24.ch returns "Produktmanager" (German) which doesn't match `\bproduct\s+manager\b`. Per Sam's call: job-accuracy > flag-accuracy. Not blocking.
+- **MCP architecture gap.** All sources currently use raw HTTP because the standalone CLI doesn't have access to the MCP `web_fetch` / `browser` tools (those are exposed only in agent-turn contexts). The MCP browser recipe for jobwinner.ch is documented in code as a constant; an agent turn can execute it.
+- **jobwinner.ch SPA limit.** Only the top 10 server-rendered jobs are reachable via raw HTTP. Full coverage requires the MCP browser path.
+- **jobs.ch title fix landed** — the title is now pulled from the `<span class="...lc_4...">` element directly, not from line-split of stripped text.
+- **German umlauts are mojibake in the JSON output** (`BA�lach` for `Bällach`, etc.). Caused by Node's text-decoding somewhere — needs investigation. Email still readable; doesn't break parsing.
+- **Linkedin descSnippet is empty** until detail enrichment pass runs. Jobs without description text get `germanRequired: false` always. Enrichment is documented as next-step.
+
 ## Known follow-ups (not blockers)
 
 - jobs.ch title field is concatenated (multi-field string). Caused by the listing-card `<a>` wrapping multiple `<div>`s without `<br>`s between them. Fix: parse the `<span class="...lc_4">` title element directly instead of splitting card text. Link/company/location/date all parse correctly.

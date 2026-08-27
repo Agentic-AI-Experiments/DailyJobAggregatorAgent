@@ -133,12 +133,26 @@ async function fetchDetailPages(urls, log) {
   return out;
 }
 
-// One listing card <a data-cy="job-link">…</a>. Layout mirrors v1 scrapeJobsCh.
+// One listing card <a data-cy="job-link">…</a>. Layout mirrors v1 scrapeJobsCh,
+// with a title-extraction fix: the actual job title lives inside a specific
+// <span class="…lc_4…"> element. Pulling it directly (rather than splitting
+// stripped text on newlines) avoids the "jammed multi-field title" bug where
+// every <div> in the card collapsed onto a single line.
 function parseCard(cardHtml, fullLink) {
+  // Pull the title span. jobs.ch uses a class chain containing 'lc_4' for the
+  // line-clamped title text. Match is permissive on surrounding classes.
+  const titleMatch = cardHtml.match(/<span[^>]*class="[^"]*\blc_4\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+  const title = titleMatch
+    ? stripHtml(titleMatch[1]).trim()
+    : (() => {
+        // Fallback: strip everything and take the first non-empty line as title.
+        const lines = stripHtml(cardHtml).split('\n').map((l) => l.trim()).filter(Boolean);
+        return lines[1] || lines[0] || '';
+      })();
+
+  // For date/company/location, use the stripped-and-newlined card text.
   const lines = stripHtml(cardHtml).split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return null;
   const dateStr = lines[0] || 'Today';
-  const title = lines[1] || lines[0];
   const placeIdx = Math.max(lines.indexOf('Place of work:'), lines.indexOf('Arbeitsort'));
   const location = placeIdx >= 0 && lines[placeIdx + 1] ? lines[placeIdx + 1] : 'Switzerland';
   const skip = new Set(['Easy apply', 'New', 'Open in new tab', '']);

@@ -130,28 +130,30 @@ function normalizeJob(p, fallbackUrl) {
 
 export default async function scrape(ctx) {
   const { logger, manifest, outputPath } = ctx;
-  const searchUrl = manifest?.searchUrl
-    || 'https://www.jobup.ch/en/job-offers.html?keyword=Product+Manager';
   const log = logger?.info ? logger : {
     info: () => {}, warn: () => {}, error: () => {},
   };
-  const fetch = ctx.webFetch || (typeof globalThis.web_fetch === 'function'
-    ? globalThis.web_fetch
-    : null);
+
+  // ctx.manifest is the full manifest file (see orchestrate.js contract).
+  const myEntry = manifest && manifest.sources && manifest.sources.find((s) => s.name === 'jobup.ch');
+  const baseUrl = (myEntry && (myEntry.searchUrls && myEntry.searchUrls[0] || myEntry.searchUrl))
+    || 'https://www.jobup.ch/en/jobs/?keyword=Product+Manager';
 
   const jobs = [];
   const seenLinks = new Set();
 
+  // 5 pages × 20 postings per page (audit said so; sub-agent confirmed in dry-run).
   for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
-    const url = appendQuery(searchUrl, { term: 'product+manager', page: pageNum });
+    const url = appendQuery(baseUrl, { page: pageNum });
     let body = '';
     try {
-      if (fetch) {
-        body = await fetch(url, { extractMode: 'text', maxChars: 2_000_000 });
-      } else {
-        log.warn('jobup.ch: no webFetch available, page skipped', { page: pageNum });
+      // Use built-in fetch. The site serves static HTML with inline JSON-LD.
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!res.ok) {
+        log.warn('jobup.ch page fetch non-ok', { page: pageNum, status: res.status });
         break;
       }
+      body = await res.text();
     } catch (e) {
       log.warn('jobup.ch page fetch failed', { page: pageNum, error: e.message });
       break;

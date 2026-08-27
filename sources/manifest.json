@@ -29,7 +29,7 @@
       "module": "src/sources/jobwinner-ch.js",
       "method": "mcp_browser",
       "enabled": true,
-      "searchUrl": "https://www.jobwinner.ch/en/jobs (search 'product manager')",
+      "searchUrl": "https://www.jobwinner.ch/en/jobs?q=product+manager",
       "timeoutMs": 120000,
       "needsDetailEnrichment": false,
       "notes": "SPA — needs JS rendering. Date badge unreliable in v1 (hard-coded to Today) — keep v1 behaviour for now, document as known issue."
@@ -76,10 +76,17 @@
       "module": "src/sources/jobup-ch.js",
       "method": "mcp_web_fetch",
       "enabled": true,
-      "searchUrl": "https://www.jobup.ch/en/job-offers.html?keyword=Product+Manager",
+      "searchUrl": "https://www.jobup.ch/en/jobs/?keyword=Product+Manager",
       "timeoutMs": 60000,
       "needsDetailEnrichment": false,
-      "notes": "5 pages × 20 postings. Inline JSON-LD on listing page. Teaser only — German detection will be limited (documented)."
+      "notes": "5 pages × 20 postings. Inline JSON-LD on listing page. Teaser only — German detection will be limited (documented).",
+      "searchUrls": [
+        "https://www.jobup.ch/en/jobs/?keyword=Product+Manager&page=1",
+        "https://www.jobup.ch/en/jobs/?keyword=Product+Manager&page=2",
+        "https://www.jobup.ch/en/jobs/?keyword=Product+Manager&page=3",
+        "https://www.jobup.ch/en/jobs/?keyword=Product+Manager&page=4",
+        "https://www.jobup.ch/en/jobs/?keyword=Product+Manager&page=5"
+      ]
     }
   ]
 }

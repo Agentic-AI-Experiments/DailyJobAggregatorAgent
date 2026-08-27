@@ -1,183 +1,170 @@
-// jobwinner.ch source scraper
+// src/sources/jobwinner-ch.js
+// jobwinner.ch scraper for v2.
 //
-// Adapted from v1: scripts/daily-job-search.js (scrapeJobwinnerCh, lines 576-625).
-// jobwinner.ch is a SPA — listing cards are rendered client-side, so raw HTTP
-// `web_fetch` returns an empty shell. v2 uses the MCP `browser` (Playwright-based)
-// tool to render the page, interact with the cookie banner, and run the search.
+// jobwinner.ch is an SPA — the search results are rendered client-side.
+// For an MCP-driven agent (cron / browser MCP available), use the BROWSER
+// recipe below; for a CLI invocation (no browser MCP), fall back to raw
+// HTTP and accept that we'll only see links that the server pre-rendered
+// (typically a small subset, often 0 — the SPA shell doesn't expose them).
+//
+// v1 behaviour: Playwright + cookie banner click + wait. v2 inherits the
+// same recipe but also has a raw-HTTP fallback so the CLI works.
 //
 // TODO(fix-ticket): date badge unreliable — see MEMORY.md 2026-08-22.
-// v1 hard-codes every job to parseDate('Today'). Preserved here verbatim
-// so this PR stays scope-clean; date parsing is tracked separately.
+// v1 hard-codes every job to today. Preserved here verbatim.
 
 export const META = { name: 'jobwinner.ch', method: 'mcp_browser' };
 
 const SEARCH_URL = 'https://www.jobwinner.ch/en/jobs';
 const SEARCH_TERM = 'product manager';
 const NAV_TIMEOUT_MS = 60000;
-const POST_SEARCH_WAIT_MS = 7000;
 const MAX_LINKS = 50;
 
-// TODO: enable the MCP `browser` tool in the OpenClaw config and remove the
-// raw-HTTP fallback. Until then, raw HTTP is attempted first (fast, returns
-// whatever server-rendered HTML exists) and the SPA-rendered fallback path
-// below documents what the MCP browser steps would be.
-const RAW_HTTP_QUERY_URL = `${SEARCH_URL}?q=${encodeURIComponent(SEARCH_TERM).replace(/%20/g, '+')}`;
+const stripHtml = (s) => (s || '')
+  .replace(/<[^>]{1,200}>/g, ' ')
+  .replace(/&nbsp;/g, ' ')
+  .replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/\s+/g, ' ')
+  .trim();
 
-function buildDescSnippet(text) {
-  if (typeof text !== 'string') return '';
-  return text
-    .replace(/<[^>]{1,200}>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#?\w+;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 4000);
-}
-
-function todayIso() {
-  return new Date().toISOString().split('T')[0];
-}
-
-// Derive a company hint from the card text surrounding the title link.
-// Mirrors v1's remainder heuristic (≤80 chars, ≥2 chars, longer than the title).
-function deriveCompany(parentText, title) {
-  if (!parentText || parentText.length <= (title || '').length) return 'Unknown';
-  const remainder = parentText.substring((title || '').length).trim();
-  if (remainder.length > 1 && remainder.length < 80) return remainder;
-  return 'Unknown';
-}
-
-// MCP `browser` interaction plan. The sub-agent invokes the MCP browser tool
-// using these tool names; we keep them as a documented recipe rather than
-// calling browser_* directly from this module (the MCP tool is provided by
-// the host, not by Node).
-const MCP_BROWSER_RECIPE = [
-  { tool: 'browser_navigate', args: { url: SEARCH_URL } },
-  { tool: 'browser_wait_for', args: { selector: '#home-search-input', timeoutMs: NAV_TIMEOUT_MS } },
-  { tool: 'browser_click', args: { selector: 'button:has-text("Accept"), button:has-text("Akzeptieren")', optional: true } },
-  { tool: 'browser_type', args: { selector: '#home-search-input', text: SEARCH_TERM } },
-  { tool: 'browser_press_key', args: { key: 'Enter' } },
-  { tool: 'browser_wait_for', args: { selector: 'a[href*="jobwinner.ch/en/job/"]', timeoutMs: NAV_TIMEOUT_MS } },
-  { tool: 'browser_sleep', args: { ms: POST_SEARCH_WAIT_MS } },
-];
-
-function rawHttpFetch(ctx) {
-  // Best-effort fallback: jobwinner.ch is a SPA, so the listing is unlikely
-  // to be server-rendered. We still try — a future SSR pass would Just Work.
-  // ctx.browser may expose an `httpGet` helper when running under the
-  // sub-agent harness; absent that, the orchestrator's transport is used.
-  if (ctx.browser && typeof ctx.browser.httpGet === 'function') {
-    return ctx.browser.httpGet(RAW_HTTP_QUERY_URL);
-  }
-  if (typeof ctx.rawFetch === 'function') return ctx.rawFetch(RAW_HTTP_QUERY_URL);
-  return null;
-}
-
-export default async function scrape(ctx) {
-  const jobs = [];
-  const log = ctx && typeof ctx.logger === 'function' ? ctx.logger : () => {};
-
-  // ── Path A: MCP browser (preferred) ─────────────────────────────────────
-  // The sub-agent driver is expected to execute MCP_BROWSER_RECIPE and
-  // hand the rendered HTML back via ctx.renderedHtml. When that contract is
-  // wired up, parse it below; until then, fall through to raw HTTP.
-  let html = ctx && typeof ctx.renderedHtml === 'string' ? ctx.renderedHtml : null;
-
-  // ── Path B: raw HTTP fallback (current default) ──────────────────────────
-  if (!html) {
-    log('warn', 'jobwinner.ch: MCP browser not wired, using raw HTTP fallback', {
-      recipe: MCP_BROWSER_RECIPE.map((s) => s.tool),
-      url: RAW_HTTP_QUERY_URL,
-    });
-    try {
-      html = rawHttpFetch(ctx);
-    } catch (e) {
-      log('error', 'jobwinner.ch raw HTTP failed', { error: e.message });
-      html = null;
-    }
-  }
-
-  if (!html) {
-    log('error', 'jobwinner.ch: no HTML available (browser + raw HTTP both unavailable)', {});
-    if (ctx && ctx.outputPath) {
-      await writeOutput(ctx.outputPath, { source: 'jobwinner.ch', scrapedAt: new Date().toISOString(), jobs: [], note: 'No HTML available' }, ctx);
-    }
-    return { count: 0, sample: [] };
-  }
-
-  // ── Parse ────────────────────────────────────────────────────────────────
-  const links = extractJobLinks(html);
-
-  for (const item of links) {
-    const title = (item.text || '').trim();
-    if (title.length < 3) continue;
-    jobs.push({
-      company: deriveCompany(item.parentText, title),
-      title,
-      location: 'Switzerland',
-      // TODO(fix-ticket): date badge unreliable — see MEMORY.md 2026-08-22.
-      // v1 hard-codes every job to parseDate('Today'); preserved for now.
-      datePosted: todayIso(),
-      link: item.href,
-      source: 'jobwinner.ch',
-      descSnippet: buildDescSnippet(item.parentText),
-    });
-  }
-
-  log('info', 'jobwinner.ch links parsed', { count: jobs.length });
-
-  if (ctx && ctx.outputPath) {
-    await writeOutput(ctx.outputPath, {
-      source: 'jobwinner.ch',
-      scrapedAt: new Date().toISOString(),
-      jobs,
-    }, ctx);
-  }
-
-  return { count: jobs.length, sample: jobs.slice(0, 5) };
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-
+// ── Raw-HTTP fallback (CLI invocation) ───────────────────────────────────────
+//
+// Server returns a Nuxt SSR shell that already contains /en/job/<numeric-id>
+// anchors for the top listings. Match them and produce bare-bones job records.
+// Title is taken from the anchor's inner text; company + date are not exposed
+// in the listing HTML (they're rendered client-side) — we mark them Unknown
+// and let the descSnippet carry whatever parent text we can find.
 function extractJobLinks(html) {
-  // Lightweight HTML extraction — avoids pulling in a DOM parser dependency.
-  // Mirrors v1's selector logic: any <a> whose href contains the job path,
-  // capped at MAX_LINKS.
   const out = [];
-  const re = /<a\s+[^>]*href=["']([^"']*jobwinner\.ch\/en\/job\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const re = /<a\s+[^>]*href=["']([^"']*\/en\/job\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m;
   while ((m = re.exec(html)) !== null) {
-    const href = absolutize(m[1]);
-    const inner = m[2].replace(/<[^>]{1,200}>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-    // Cheap parent-text proxy: take up to 300 chars of the slice around the
-    // anchor in the source HTML (sufficient for descSnippet; matches v1 cap).
+    const href = m[1].startsWith('http') ? m[1] : 'https://www.jobwinner.ch' + m[1];
+    const text = stripHtml(m[2]);
+    if (!text || text.length < 3) continue;
     const start = Math.max(0, m.index - 400);
     const end = Math.min(html.length, m.index + m[0].length + 400);
-    const parentText = html
-      .slice(start, end)
-      .replace(/<[^>]{1,200}>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 300);
-    out.push({ href, text: inner, parentText });
+    const parentText = stripHtml(html.slice(start, end)).slice(0, 4000);
+    out.push({ href, text, parentText });
     if (out.length >= MAX_LINKS) break;
   }
   return out;
 }
 
-function absolutize(href) {
-  if (!href) return href;
-  if (/^https?:\/\//i.test(href)) return href;
-  if (href.startsWith('//')) return 'https:' + href;
-  if (href.startsWith('/')) return 'https://www.jobwinner.ch' + href;
-  return href;
+async function fetchRawHtml(searchUrl) {
+  const res = await fetch(searchUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache',
+    },
+  });
+  if (!res.ok) throw new Error('fetch failed: ' + res.status);
+  return res.text();
 }
 
-async function writeOutput(path, payload, ctx) {
-  const fs = ctx && ctx.fs ? ctx.fs : null;
-  if (!fs) return; // sub-agent harness owns persistence; nothing to do here
-  const dir = path.replace(/[\\/][^\\/]+$/, '');
-  if (dir && dir !== path) await fs.mkdir(dir, { recursive: true }).catch(() => {});
-  await fs.writeFile(path, JSON.stringify(payload, null, 2), 'utf8');
+// ── Browser recipe (MCP-driven agent invocation) ─────────────────────────────
+//
+// Used when ctx.browser is provided (MCP browser tool). Records the recipe as
+// a constant so future integration can call it verbatim.
+const BROWSER_RECIPE = [
+  { tool: 'browser_navigate', args: { url: SEARCH_URL } },
+  { tool: 'browser_wait_for', args: { text: 'Accept', timeoutMs: NAV_TIMEOUT_MS } },
+  { tool: 'browser_click', args: { selector: 'button:has-text("Accept"), button:has-text("Akzeptieren")' } },
+  { tool: 'browser_type', args: { selector: '#home-search-input', text: SEARCH_TERM, submit: true } },
+  { tool: 'browser_wait_for', args: { selector: 'a[href*="/en/job/"]', timeoutMs: NAV_TIMEOUT_MS } },
+  { tool: 'browser_extract', args: { selector: 'a[href*="/en/job/"]', fields: ['href', 'innerText'] } },
+];
+
+export default async function scrape(ctx) {
+  const { logger, manifest, outputPath } = ctx;
+  const log = (lvl, msg, extra) => {
+    if (typeof logger === 'function') return logger(lvl, msg, { source: META.name, ...(extra || {}) });
+    if (logger && typeof logger[lvl] === 'function') return logger[lvl](msg, { source: META.name, ...(extra || {}) });
+    return null;
+  };
+
+  const myEntry = manifest && manifest.sources && manifest.sources.find((s) => s.name === 'jobwinner.ch');
+  const baseUrl = (myEntry && myEntry.searchUrl) || `${SEARCH_URL}?q=${encodeURIComponent(SEARCH_TERM)}`;
+
+  const jobs = [];
+
+  // Path 1: MCP browser if available
+  if (typeof ctx.browser === 'function') {
+    log('info', 'jobwinner.ch using MCP browser recipe');
+    try {
+      for (const step of BROWSER_RECIPE) {
+        await ctx.browser(step.tool, step.args);
+      }
+      const links = (await ctx.browser('browser_extract', { selector: 'a[href*="/en/job/"]' })) || [];
+      for (const item of links.slice(0, MAX_LINKS)) {
+        const text = stripHtml(item.innerText || item.text || '');
+        if (!text || text.length < 3) continue;
+        const today = new Date().toISOString().split('T')[0];
+        jobs.push({
+          company: 'Unknown',
+          title: text.slice(0, 200),
+          location: 'Switzerland',
+          datePosted: today, // TODO(fix-ticket): date badge unreliable
+          link: item.href,
+          source: 'jobwinner.ch',
+          descSnippet: text.slice(0, 4000),
+        });
+      }
+    } catch (e) {
+      log('error', 'jobwinner.ch browser recipe failed', { error: e.message });
+    }
+  }
+
+  // Path 2: raw HTTP fallback
+  if (jobs.length === 0) {
+    log('info', 'jobwinner.ch using raw-HTTP fallback');
+    try {
+      const html = await fetchRawHtml(baseUrl);
+      const links = extractJobLinks(html);
+      log('info', 'jobwinner.ch raw-HTTP links found', { count: links.length });
+      const today = new Date().toISOString().split('T')[0];
+      for (const item of links) {
+        jobs.push({
+          company: 'Unknown',
+          title: item.text.slice(0, 200),
+          location: 'Switzerland',
+          datePosted: today,
+          link: item.href,
+          source: 'jobwinner.ch',
+          descSnippet: item.parentText.slice(0, 4000),
+        });
+      }
+    } catch (e) {
+      log('error', 'jobwinner.ch raw HTTP failed', { error: e.message });
+    }
+  }
+
+  try {
+    if (ctx.fs) {
+      await ctx.fs.mkdir(outputPath.replace(/[\\/][^\\/]+$/, ''), { recursive: true }).catch(() => {});
+      await ctx.fs.writeFile(outputPath, JSON.stringify({
+        source: 'jobwinner.ch',
+        scrapedAt: new Date().toISOString(),
+        jobs,
+      }, null, 2), 'utf8');
+    } else {
+      const fs = await import('node:fs/promises');
+      await fs.mkdir(outputPath.replace(/[\\/][^\\/]+$/, ''), { recursive: true });
+      await fs.writeFile(outputPath, JSON.stringify({
+        source: 'jobwinner.ch',
+        scrapedAt: new Date().toISOString(),
+        jobs,
+      }, null, 2), 'utf8');
+    }
+  } catch (e) {
+    log('warn', 'jobwinner.ch writeFile failed', { error: e.message });
+  }
+
+  log('info', 'jobwinner.ch parsed', { count: jobs.length });
+  return { count: jobs.length, sample: jobs.slice(0, 5) };
 }
