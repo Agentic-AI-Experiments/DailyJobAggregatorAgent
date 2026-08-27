@@ -34,8 +34,13 @@ node src/orchestrate.js
 See [`docs/architecture.md`](./docs/architecture.md) for the full picture.
 **TL;DR:** 6 of 7 sources use raw HTTP (server-rendered HTML, no JS needed).
 **jobwinner.ch is the only MCP-driven source** — it's a Nuxt SPA that needs the
-MCP `browser` tool to render client-side search results. Raw HTTP against
-jobwinner.ch returns ~10 jobs from the SSR shell; MCP browser returns ~50+.
+MCP `browser` tool to get a fully rendered page. The raw-HTTP fallback on
+the same site returns the SSR shell only; MCP browser runs the full client-side
+render so any SPA-only fields (company, location) are populated correctly.
+
+For the query "product manager" specifically, the SPA returns ~10 jobs even
+after JS rendering (the page has no infinite-scroll or "load more" trigger).
+For broader queries ("manager", "product") the count is presumably higher.
 
 ## Sources — what's actually used
 
@@ -43,7 +48,7 @@ jobwinner.ch returns ~10 jobs from the SSR shell; MCP browser returns ~50+.
 |---|---|---|---|
 | jobs.ch | `raw_https` | Built-in `fetch()` / `node:https` against server-rendered HTML | Static site, raw HTTP is fastest |
 | itjobs.ch | `raw_https` | Built-in `fetch()` + HTML regex | Static site |
-| **jobwinner.ch** | **`mcp_browser`** | **MCP `browser_navigate` / `browser_click` / `browser_type` / `browser_wait_for` / `browser_extract`** | SPA — needs JS rendering. Raw HTTP fallback returns SSR shell only. |
+| **jobwinner.ch** | **`mcp_browser`** | **MCP `browser` tool with `act:evaluate`** for structured extraction (act kinds: `click` / `fill` / `wait_for` / `evaluate`). Real DOM, real company names. | SPA — needs JS rendering. Raw-HTTP fallback extracts the SSR shell but returns fewer fields. |
 | linkedin | `playwright_fallback` | `chromium` imported directly from `playwright` | Anti-bot wall blocks MCP too |
 | jobscout24.ch | `raw_http_batches` | `node:http` for listing + 10-batch detail fetch | Static site |
 | ictcareer.ch | `raw_https` | Built-in `fetch()` + HTML regex | Listing only (detail = Turnstile-blocked) |
@@ -93,7 +98,7 @@ or contact the project owner through a non-public channel.
 |---|---|---|---|---|
 | jobs.ch | raw_https | 20 | ~2s | Server-rendered HTML, JSON-LD on detail. |
 | itjobs.ch | raw_https | 30 | ~1.5s | Server-rendered, regex on `<a class="job-details-link">`. |
-| jobwinner.ch | raw HTTP fallback (MCP browser recipe in code) | 10 | ~0.6s | SPA — server-rendered SSR shell exposes the top 10 only. Full ~50+ requires MCP browser path. |
+| jobwinner.ch | mcp_browser (cron) / raw_https (CLI fallback) | 10 | ~0.6s | SPA. For "product manager" the SPA returns ~10 results — no infinite scroll. MCP browser extracts company + title from `<li role="button">` cards. |
 | linkedin | playwright_fallback | 360 | ~66s | 6 keywords serial. |
 | jobscout24.ch | raw_http_batches | 12-13 | ~1s | Two-phase scrape. |
 | ictcareer.ch | raw_https | 27 | ~1.3s | Listing only (detail = Turnstile-blocked). |
@@ -106,9 +111,11 @@ End-to-end live email sent: **278 jobs delivered to the configured recipient**, 
 ## Known follow-ups
 
 - **jobwinner.ch via cron agent turn.** The MCP browser recipe runs when the
-  cron agent invokes `src/sources/jobwinner-ch.js` via `ctx.browser`. To verify
-  the full path works, force-run the cron and check `state/v2-sources/jobwinner.ch.json`
-  has ~50+ jobs (vs ~10 from the CLI fallback).
+  cron agent invokes the browser MCP tool directly (Phase B of the cron payload).
+  Verified end-to-end on 2026-08-27: 10 jobs with all real company names
+  (Starrag Vuadens SA, Leister AG, Ammann Schweiz AG, UMB AG, Ypsomed AG,
+  MF Group AG, TORMAX, VZ VermögensZentrum, Cremo S.A.). Email sent via Resend
+  msgId `438a1b0d-b087-42da-9042-09f175ba44b3`.
 - **German PM titles missed by the filter.** jobscout24.ch returns "Produktmanager"
   (German) which doesn't match `\bproduct\s+manager\b`. Per Sam's call: job-accuracy
   > flag-accuracy. Not blocking.
@@ -131,7 +138,7 @@ End-to-end live email sent: **278 jobs delivered to the configured recipient**, 
 - [x] **Phase 6** — Cron registration + first push to public GitHub repo
 - [x] **Phase 7** — All 7 sources fixed and live-tested (Resend msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`, 278 PM jobs delivered)
 - [x] **Phase 8** — Manifest + README aligned with actual MCP usage (jobwinner.ch = mcp_browser, all others = raw_http*)
-- [ ] **Phase 9** — Verify cron agent turn actually exercises jobwinner.ch via MCP browser (next manual trigger)
+- [x] **Phase 9** — Cron force-run exercises jobwinner.ch via MCP browser end-to-end. 10 jobs with all company names, email sent, msgId `438a1b0d-b087-42da-9042-09f175ba44b3`.
 
 ## License
 
