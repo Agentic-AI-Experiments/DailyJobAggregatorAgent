@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "comment": "Single source of truth for which sources run, in what order, with what timeouts. Add/remove entries here without code edits to orchestrate.js.",
+  "defaultTimeoutMs": 90000,
+  "defaultCutoffDays": 14,
+  "sources": [
+    {
+      "name": "jobs.ch",
+      "module": "src/sources/jobs-ch.js",
+      "method": "mcp_web_fetch",
+      "enabled": true,
+      "searchUrl": "https://www.jobs.ch/en/vacancies/?term=product+manager",
+      "timeoutMs": 90000,
+      "needsDetailEnrichment": true,
+      "notes": "Listing cards short — must fetch detail pages for German detection. JSON-LD available on detail."
+    },
+    {
+      "name": "itjobs.ch",
+      "module": "src/sources/itjobs-ch.js",
+      "method": "mcp_web_fetch",
+      "enabled": true,
+      "searchUrl": "https://www.itjobs.ch/jobs?search=product+manager",
+      "timeoutMs": 60000,
+      "needsDetailEnrichment": false,
+      "notes": "Card text ≥200 chars usually; skip enrichment. German abbreviations Tg/Std on dates."
+    },
+    {
+      "name": "jobwinner.ch",
+      "module": "src/sources/jobwinner-ch.js",
+      "method": "mcp_browser",
+      "enabled": true,
+      "searchUrl": "https://www.jobwinner.ch/en/jobs (search 'product manager')",
+      "timeoutMs": 120000,
+      "needsDetailEnrichment": false,
+      "notes": "SPA — needs JS rendering. Date badge unreliable in v1 (hard-coded to Today) — keep v1 behaviour for now, document as known issue."
+    },
+    {
+      "name": "linkedin",
+      "module": "src/sources/linkedin.js",
+      "method": "playwright_fallback",
+      "enabled": true,
+      "searchUrls": [
+        "https://www.linkedin.com/jobs/search/?keywords=Product%20Manager&location=Switzerland&f_TPR=r604800&sortBy=DD",
+        "https://www.linkedin.com/jobs/search/?keywords=Senior%20Product%20Manager&location=Switzerland&f_TPR=r604800&sortBy=DD",
+        "https://www.linkedin.com/jobs/search/?keywords=Head%20of%20Product&location=Switzerland&f_TPR=r604800&sortBy=DD",
+        "https://www.linkedin.com/jobs/search/?keywords=Product%20Owner&location=Switzerland&f_TPR=r604800&sortBy=DD",
+        "https://www.linkedin.com/jobs/search/?keywords=Technical%20Product%20Manager&location=Switzerland&f_TPR=r604800&sortBy=DD",
+        "https://www.linkedin.com/jobs/search/?keywords=Lead%20Product%20Manager&location=Switzerland&f_TPR=r604800&sortBy=DD"
+      ],
+      "timeoutMs": 180000,
+      "needsDetailEnrichment": true,
+      "notes": "Playwright only (anti-bot wall). 6 keywords serial — v2 keeps same pattern (LinkedIn nav never settles so parallelism doesn't help)."
+    },
+    {
+      "name": "jobscout24.ch",
+      "module": "src/sources/jobscout24-ch.js",
+      "method": "mcp_web_fetch_plus_raw_http",
+      "enabled": true,
+      "searchUrl": "https://www.jobscout24.ch/de/jobs/productmanager/",
+      "timeoutMs": 120000,
+      "needsDetailEnrichment": true,
+      "notes": "Listing via web_fetch; detail pages via raw HTTP in 10-batch. JSON-LD on detail."
+    },
+    {
+      "name": "ictcareer.ch",
+      "module": "src/sources/ictcareer-ch.js",
+      "method": "mcp_web_fetch",
+      "enabled": true,
+      "searchUrl": "https://ictcareer.ch/en/jobs?q=Product+Manager",
+      "timeoutMs": 60000,
+      "needsDetailEnrichment": false,
+      "notes": "Detail pages blocked by Cloudflare Turnstile under headless. Listing-only. Document the limitation in scrape log."
+    },
+    {
+      "name": "jobup.ch",
+      "module": "src/sources/jobup-ch.js",
+      "method": "mcp_web_fetch",
+      "enabled": true,
+      "searchUrl": "https://www.jobup.ch/en/job-offers.html?keyword=Product+Manager",
+      "timeoutMs": 60000,
+      "needsDetailEnrichment": false,
+      "notes": "5 pages × 20 postings. Inline JSON-LD on listing page. Teaser only — German detection will be limited (documented)."
+    }
+  ]
+}
