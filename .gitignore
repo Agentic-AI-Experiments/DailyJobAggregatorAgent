@@ -54,3 +54,7 @@ backup-staging/
 .openclaw/
 cron-registration.json
 cron-payload.json
+
+# ─── Scratch / tool-helper files (don't commit staging files git wrote) ────
+*.commitmsg.txt
+.tmp/
