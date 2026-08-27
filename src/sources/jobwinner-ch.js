@@ -37,18 +37,33 @@ const stripHtml = (s) => (s || '')
 // Title is taken from the anchor's inner text; company + date are not exposed
 // in the listing HTML (they're rendered client-side) — we mark them Unknown
 // and let the descSnippet carry whatever parent text we can find.
-function extractJobLinks(html) {
+function extractJobCards(html) {
+  // Each card is a <li role="button"> containing:
+  //   <h2><a href="/en/job/<id>">{title}</a></h2>
+  //   <p class="styled__Subtitle...">{company}</p>
+  // (plus footer with location, etc.)
   const out = [];
-  const re = /<a\s+[^>]*href=["']([^"']*\/en\/job\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const seen = new Set();
+  const cardRe = /<li[^>]+role="button"[^>]*>([\s\S]*?)<\/li>/g;
+  const titleLinkRe = /<a[^>]+href="(\/en\/job\/(\d+)[^"]*)"[^>]*>([^<]+)<\/a>/;
+  const companyRe = /<p[^>]+class="[^"]*Subtitle[^"]*"[^>]*>([^<]+)<\/p>/;
   let m;
-  while ((m = re.exec(html)) !== null) {
-    const href = m[1].startsWith('http') ? m[1] : 'https://www.jobwinner.ch' + m[1];
-    const text = stripHtml(m[2]);
-    if (!text || text.length < 3) continue;
-    const start = Math.max(0, m.index - 400);
-    const end = Math.min(html.length, m.index + m[0].length + 400);
-    const parentText = stripHtml(html.slice(start, end)).slice(0, 4000);
-    out.push({ href, text, parentText });
+  cardRe.lastIndex = 0;
+  while ((m = cardRe.exec(html)) !== null) {
+    const block = m[1];
+    const link = titleLinkRe.exec(block);
+    if (!link) continue;
+    const id = link[2];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const cm = block.match(companyRe);
+    const company = cm ? stripHtml(cm[1]) : 'Unknown';
+    out.push({
+      id,
+      href: 'https://www.jobwinner.ch' + link[1],
+      title: stripHtml(link[3]).slice(0, 200),
+      company,
+    });
     if (out.length >= MAX_LINKS) break;
   }
   return out;
@@ -134,21 +149,21 @@ export default async function scrape(ctx) {
   //   - CLI invocation (no ctx.browser)
   //   - MCP browser failed and jobs.length === 0
   if (jobs.length === 0) {
-    log('info', 'jobwinner.ch using raw-HTTP fallback (SSR shell only; expect ~10 jobs)');
+    log('info', 'jobwinner.ch using raw-HTTP fallback (SSR shell; expect ~10 jobs but with company names)');
     try {
       const html = await fetchRawHtml(baseUrl);
-      const links = extractJobLinks(html);
-      log('info', 'jobwinner.ch raw-HTTP links found', { count: links.length });
+      const cards = extractJobCards(html);
+      log('info', 'jobwinner.ch raw-HTTP cards found', { count: cards.length });
       const today = new Date().toISOString().split('T')[0];
-      for (const item of links) {
+      for (const item of cards) {
         jobs.push({
-          company: 'Unknown',
-          title: item.text.slice(0, 200),
+          company: item.company,
+          title: item.title,
           location: 'Switzerland',
           datePosted: today,
           link: item.href,
           source: 'jobwinner.ch',
-          descSnippet: item.parentText.slice(0, 4000),
+          descSnippet: `${item.title} — ${item.company}`.slice(0, 4000),
         });
       }
     } catch (e) {
