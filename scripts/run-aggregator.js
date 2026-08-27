@@ -62,6 +62,11 @@ async function main() {
   console.log(`[run-aggregator] jobwinner.ch state file: ${existsSync(jwFile) ? 'present' : 'absent'}`);
 
   console.log(`[run-aggregator] Running merge-only step...`);
+  if (process.argv.includes('--skip-merge')) {
+    console.log(`[run-aggregator] --skip-merge: skipping merge step`);
+    console.log(`[run-aggregator] Done in ${Date.now() - t0}ms wall-clock total (no merge).`);
+    return;
+  }
   const mergeStartedAt = Date.now();
   await new Promise((resolve) => {
     const child = spawn(

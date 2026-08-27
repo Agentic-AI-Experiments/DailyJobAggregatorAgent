@@ -38,7 +38,16 @@ See [`docs/architecture.md`](./docs/architecture.md) for the full picture.
 - **`scripts/run-aggregator.js`** — single Node process that spawns 6 parallel child processes (one per raw-HTTP source), then runs the merge step. Wall-clock = slowest source (~66s for LinkedIn), not the sum.
 - **MCP `browser` tool** — driven directly by the cron agent turn, before the script runs. Only used for jobwinner.ch (Nuxt SPA, needs JS rendering). Writes `state/v2-sources/jobwinner.ch.json` which the merge step picks up.
 
-**Earlier `sessions_spawn` approach was abandoned.** Sessions_spawn yielded after spawning and never reliably woke back up to run the merge step. Replaced with `node:child_process.spawn` inside one script — same wall-clock speedup, deterministic, no wake semantics to depend on.
+**Earlier `sessions_spawn` approach was abandoned** for parallel source scraping (yielded after spawning and never reliably woke back up). The current architecture uses `node:child_process.spawn` inside `scripts/run-aggregator.js` — same wall-clock speedup, deterministic, no wake semantics.
+
+**Three sub-agents handle the post-merge pipeline** (each in `src/stages/`):
+1. **`evaluate.js`** — PM-fit rating. Reads `state/v2-sources/*.json`, applies filters, rates each job 0-10, writes `state/evaluated-jobs.json`. Drops jobs scoring < FIT_THRESHOLD (default 5).
+2. **`dedupe.js`** — Cross-source + cross-run dedup. Reads `state/evaluated-jobs.json`, dedups against `state/job-history.json`, writes `state/new-jobs.json` + updates history.
+3. **`mailer.js`** — Email dispatch. Reads `state/new-jobs.json`, sends via Resend.
+
+Run all three in sequence via `scripts/run-pipeline.js` (one exec), OR spawn them as three separate `sessions_spawn` sub-agents from the cron agent turn. The single-script path is the recommended default — same outcome, deterministic, no sub-agent wake-timing risk.
+
+**Wall-clock:** ~66s for the source-scraping step (LinkedIn bound), then ~1s for the 3-stage pipeline (rating + dedup + email). Total: ~67s per run.
 
 ## Sources — what's actually used
 
@@ -143,7 +152,8 @@ On 2026-08-27 13:25 with cleared history, all 296 PM-filtered jobs were treated 
 - [x] **Phase 7** — All 7 sources fixed and live-tested (278 PM jobs delivered, msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`)
 - [x] **Phase 8** — Manifest + README aligned with actual MCP usage (`method` field per source)
 - [x] **Phase 9** — MCP browser end-to-end verified for jobwinner.ch (msgId `438a1b0d-b087-42da-9042-09f175ba44b3`)
-- [x] **Phase 10** — `sessions_spawn` abandoned in favour of `scripts/run-aggregator.js` (single Node process, 6 parallel `child_process` instances). Wall-clock bound by slowest source (~66s). Trigger the cron with 2-step payload: MCP browser for jobwinner.ch, then one exec call to `node scripts/run-aggregator.js`.
+- [x] **Phase 10** — `sessions_spawn` abandoned for parallel sources; `scripts/run-aggregator.js` runs 6 raw-HTTP sources as parallel `child_process` instances, then merges via `--merge-only`. Wall-clock bound by slowest source (~66s).
+- [x] **Phase 11** — Three sequential sub-agents for post-merge pipeline: `evaluate.js` (PM-fit rating 0-10), `dedupe.js` (cross-source + cross-run), `mailer.js` (email dispatch). Run via `scripts/run-pipeline.js` (one exec) or via 3 `sessions_spawn` sub-agents.
 
 ## License
 

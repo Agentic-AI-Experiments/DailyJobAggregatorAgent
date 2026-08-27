@@ -2,10 +2,16 @@
 
 ## Overview
 
-The DailyJobAggregatorAgent is a **two-component pipeline**:
+The DailyJobAggregatorAgent is a **two-stage, five-step pipeline**:
 
-1. **`scripts/run-aggregator.js`** — single Node process that spawns 6 parallel child processes (one per raw-HTTP source) + runs the final merge step. Wall-clock = slowest source (~66s for LinkedIn), not the sum of all sources.
-2. **MCP `browser` tool** — driven by the cron agent turn directly, before the script runs. Only used for jobwinner.ch (the one Nuxt SPA that needs JS rendering). Writes `state/v2-sources/jobwinner.ch.json` which the merge step picks up.
+1. **`scripts/run-aggregator.js`** — single Node process that spawns 6 parallel child processes (one per raw-HTTP source), then optionally runs the merge step. Wall-clock = slowest source (~66s for LinkedIn).
+2. **MCP `browser` tool** — driven by the cron agent turn directly, before the script runs. Only used for jobwinner.ch (the one Nuxt SPA that needs JS rendering). Writes `state/v2-sources/jobwinner.ch.json`.
+3. **Three sub-agents for the post-merge pipeline** (`src/stages/`):
+   - **`evaluate.js`** — PM-fit rating 0-10. Reads all 7 `state/v2-sources/*.json`, applies filters, drops jobs scoring < FIT_THRESHOLD (default 5). Writes `state/evaluated-jobs.json`.
+   - **`dedupe.js`** — Cross-source + cross-run dedup. Reads `state/evaluated-jobs.json`, dedups against `state/job-history.json`, writes `state/new-jobs.json` + updates history.
+   - **`mailer.js`** — Email dispatch. Reads `state/new-jobs.json`, sends via Resend.
+
+Run the three sub-agents via `scripts/run-pipeline.js` (one exec, sequential Node child processes) OR spawn them as three `sessions_spawn` sub-agents from the cron agent turn.
 
 The agent turn does **not** use `sessions_spawn` anymore. That pattern yielded after spawning and never reliably woke back up to run the merge step. Replaced with `node:child_process` parallelism inside one script — same wall-clock speedup, deterministic, no yield handling.
 

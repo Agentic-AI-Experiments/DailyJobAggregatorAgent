@@ -16,9 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { jobFingerprint } from './utils/fingerprint.js';
 import { buildDescSnippet } from './utils/desc-snippet.js';
-import { detectGermanWithBodyFallback } from './filters/german-detector.js';
-import { matchesPMPositive } from './filters/pm-positive.js';
-import { matchesHardNo } from './filters/hard-no.js';
+import { applyFilters } from './filters/index.js';
 import { secretFromEnvOrFile } from './utils/secrets.js';
 import { renderDigest } from './email/template.js';
 import { sendDigest } from './email/send.js';
@@ -133,22 +131,6 @@ function loadSourceJobs(sourceName) {
 }
 
 // ─── Filter + dedup ───────────────────────────────────────────────────────────
-function isRelevant(job) {
-  if (matchesHardNo(job.title)) return false;
-  if (matchesPMPositive(job.title)) return true;
-  if (job.descSnippet && matchesPMPositive(job.descSnippet)) return true;
-  return false;
-}
-
-function applyFilters(jobs) {
-  const cutoffOk = jobs.filter(j => j.datePosted >= CUTOFF_STR);
-  const pmFiltered = cutoffOk.filter(isRelevant);
-  const withGerman = pmFiltered.map(j => ({
-    ...j,
-    germanRequired: detectGermanWithBodyFallback(j.title, j.descSnippet),
-  }));
-  return withGerman;
-}
 
 function dedupAgainstHistory(jobs, historyFingerprints) {
   const seen = new Set(historyFingerprints);
