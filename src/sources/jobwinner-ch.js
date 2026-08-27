@@ -86,13 +86,32 @@ async function fetchRawHtml(searchUrl) {
 //
 // Used when ctx.browser is provided (MCP browser tool). Records the recipe as
 // a constant so future integration can call it verbatim.
+// Browser recipe for the MCP browser MCP tool. Each step is a `browser(...)` call
+// from the agent's perspective. Run this recipe from inside an OpenClaw agent
+// turn (e.g. the cron job's isolated session) where the `browser` tool is in
+// toolsAllow.
+//
+// NOTE: MCP browser has no `browser_extract` action. To pull structured data
+// from the rendered page, use `act:evaluate` with a JS function that runs in
+// the page context and returns the data we need. The JS below targets each
+// <li role="button"> card and extracts {href, title, company} from the
+// anchor + sibling <p class="...Subtitle..."> — the same DOM the raw-HTTP
+// fallback parses.
 const BROWSER_RECIPE = [
-  { tool: 'browser_navigate', args: { url: SEARCH_URL } },
-  { tool: 'browser_wait_for', args: { text: 'Accept', timeoutMs: NAV_TIMEOUT_MS } },
-  { tool: 'browser_click', args: { selector: 'button:has-text("Accept"), button:has-text("Akzeptieren")' } },
-  { tool: 'browser_type', args: { selector: '#home-search-input', text: SEARCH_TERM, submit: true } },
-  { tool: 'browser_wait_for', args: { selector: 'a[href*="/en/job/"]', timeoutMs: NAV_TIMEOUT_MS } },
-  { tool: 'browser_extract', args: { selector: 'a[href*="/en/job/"]', fields: ['href', 'innerText'] } },
+  { tool: 'browser', args: { action: 'navigate', url: SEARCH_URL } },
+  { tool: 'browser', args: { action: 'wait_for', text: 'Accept', timeoutMs: NAV_TIMEOUT_MS } },
+  { tool: 'browser', args: { action: 'act', kind: 'click',
+    selector: 'button:has-text("Accept"), button:has-text("Akzeptieren")' } },
+  { tool: 'browser', args: { action: 'act', kind: 'fill',
+    selector: '#home-search-input', text: SEARCH_TERM, submit: true } },
+  { tool: 'browser', args: { action: 'wait_for',
+    selector: 'a[href*="/en/job/"]', timeoutMs: NAV_TIMEOUT_MS } },
+  { tool: 'browser', args: { action: 'act', kind: 'evaluate', fn:
+    "Array.from(document.querySelectorAll('li[role=\"button\"]')).map(li => {"
+   + "  const a = li.querySelector('a[href*=\"/en/job/\"]');"
+   + "  return a ? { href: a.href, title: a.textContent.trim(),"
+   + "    company: (li.querySelector('p[class*=\"Subtitle\"]')?.textContent || '').trim() || 'Unknown' } : null;"
+   + "}).filter(Boolean)" } },
 ];
 
 export default async function scrape(ctx) {
