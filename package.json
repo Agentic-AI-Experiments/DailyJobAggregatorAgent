@@ -1,0 +1,30 @@
+{
+  "name": "daily-job-aggregator-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Switzerland-focused product-manager job aggregator (MCP-primary, Playwright-fallback).",
+  "main": "src/orchestrate.js",
+  "scripts": {
+    "start": "node src/orchestrate.js",
+    "dry-run": "node src/orchestrate.js --dry-run",
+    "smoke": "node tests/smoke.js",
+    "backup": "node scripts/backup.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "playwright": "*",
+    "resend": "*"
+  },
+  "optionalDependencies": {
+    "openpgp": "*"
+  },
+  "comments": {
+    "node_modules": "Intentionally NOT installed in this directory. Resolved via NODE_PATH to C:/Users/Admin/.openclaw/workspace/node_modules. Run `npm install` locally if forking to a fresh host.",
+    "playwright": "Required only for the LinkedIn fallback path. Other sources use MCP web_fetch / browser MCP.",
+    "resend": "Required for the digest email send. API key loaded from secrets.md / env.",
+    "openpgp": "Optional. Used by scripts/backup.js if/when archive encryption is enabled."
+  }
+}

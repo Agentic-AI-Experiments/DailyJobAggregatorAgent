@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore — Public repo (Agentic-AI-Experiments/DailyJobAggregatorAgent)
+#
+# CRITICAL: anything not gitignored WILL be pushed to a public GitHub repo.
+# Review every line before relaxing it. When in doubt, leave it ignored.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── Secrets (NEVER commit) ──────────────────────────────────────────────────
+secrets.md
+*.secret
+*.secret.md
+.env
+.env.*
+!.env.example
+
+# ─── Runtime state (regenerated each run, contains scraped data) ──────────────
+state/
+*.json.tmp
+
+# ─── Logs (may contain scraped URLs, response snippets, debug data) ───────────
+logs/
+*.log
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json.bak
+
+# ─── Local IDE / OS junk ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Test artefacts ───────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+tests/fixtures/private/
+tests/.tmp/
+
+# ─── Backup / archive outputs (intermediates) ────────────────────────────────
+*.tar.gz
+*.zip
+*.bak
+backup-staging/
+
+# ─── OpenClaw runtime / gateway artefacts (would leak infra details) ──────────
+.openclaw/
+cron-registration.json
+cron-payload.json
