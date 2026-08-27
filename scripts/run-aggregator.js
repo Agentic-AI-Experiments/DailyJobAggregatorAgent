@@ -33,7 +33,7 @@ function scrapeOne(source) {
     const startedAt = Date.now();
     const child = spawn(
       'node',
-      ['src/orchestrate.js', `--source=${source}`, '--skip-email'],
+      ['src/orchestrate.js', `--source=${source}`, '--skip-email', '--skip-history'],
       { cwd: PROJECT, stdio: 'inherit' },
     );
     child.on('exit', (code) => {

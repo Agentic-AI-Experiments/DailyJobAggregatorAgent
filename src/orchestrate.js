@@ -36,6 +36,7 @@ const NEW_JOBS_FILE = path.join(STATE_DIR, 'new-jobs.json');
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has('--dry-run');
 const SKIP_EMAIL = args.has('--skip-email');
+const SKIP_HISTORY = args.has('--skip-history');  // for parallel child processes: do not pollute history
 const MERGE_ONLY = args.has('--merge-only');
 const sourceArg = [...args].find(a => a.startsWith('--source='));
 const SOURCE_FILTER = sourceArg
@@ -229,9 +230,13 @@ async function main() {
   log('info', 'new jobs', { count: newJobs.length });
 
   // 5) Persist
-  saveNewJobs(newJobs);
-  const updatedHistory = [...history, ...newJobs].slice(-5000); // cap to last 5000
-  saveHistory(updatedHistory);
+  if (!SKIP_HISTORY) {
+    saveNewJobs(newJobs);
+    const updatedHistory = [...history, ...newJobs].slice(-5000); // cap to last 5000
+    saveHistory(updatedHistory);
+  } else {
+    log('info', 'skipping history write (single-source mode)');
+  }
 
   // 6) Email (skip in --dry-run / --skip-email / when 0 new jobs)
   if (newJobs.length === 0) {
