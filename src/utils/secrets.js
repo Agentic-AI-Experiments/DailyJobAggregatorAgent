@@ -39,7 +39,9 @@ function readSecretsMdKey(key) {
     const content = fs.readFileSync(secretsPath, 'utf8');
     // Anchored on each line so a stray substring match in free text is impossible.
     // The value group excludes ", ', \r, \n so quoted and unquoted forms both parse.
-    const re = new RegExp(`^\\s*${key}\\s*=\\s*"?([^"'\\r\\n]+?)"?\\s*$`, 'mi');
+    // Optional wrapper quotes may be " or '. The leading and trailing quote chars
+    // are matched but not captured.
+    const re = new RegExp(`^\\s*${key}\\s*=\\s*(?:"|')?([^"'\\r\\n]+?)(?:"|')?\\s*$`, 'mi');
     const m = content.match(re);
     return m ? m[1].trim() : null;
   } catch {
