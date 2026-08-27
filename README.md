@@ -3,8 +3,9 @@
 A Switzerland-focused product-manager job aggregator. Scrapes 7 sources, filters
 to PM roles, dedups against history, and emails a daily digest.
 
-> **Status:** Phase 1 scaffold. Not yet wired end-to-end. See `docs/architecture.md`
-> for the design and the `Roadmap` section below for build progress.
+> **Status:** Phases 1–6 complete. Live end-to-end run sends ~280 PM jobs per
+> invocation. See [`docs/architecture.md`](./docs/architecture.md) and the
+> live test results below.
 
 ## Quick start (local dev)
 
@@ -15,10 +16,10 @@ cd DailyJobAggregatorAgent
 
 # 2. Install (uses sibling OpenClaw workspace's node_modules; see below)
 npm install
+# OR if you're on the laptop with the v1 OpenClaw workspace, create a junction:
+#   New-Item -ItemType Junction -Path node_modules -Target C:\Users\Admin\.openclaw\workspace\scripts\node_modules
 
-# 3. Restore secrets
-#    Copy `secrets.md` from your personalisation backup archive into the
-#    project root. This file is gitignored. NEVER commit it.
+# 3. Restore secrets (gitignored)
 cp /path/to/backup/secrets.md ./secrets.md
 
 # 4. Dry-run (no email sent)
@@ -28,45 +29,29 @@ node src/orchestrate.js --dry-run
 node src/orchestrate.js
 ```
 
-## node_modules sharing
+## Architecture overview
 
-This project intentionally does not vendor its own `node_modules/`. It runs
-against the OpenClaw workspace's node_modules at `C:\Users\Admin\.openclaw\workspace\`
-via Node's module resolution + `NODE_PATH`. Documented in `docs/architecture.md`.
+See [`docs/architecture.md`](./docs/architecture.md) for the full picture.
+**TL;DR:** 6 of 7 sources use raw HTTP (server-rendered HTML, no JS needed).
+**jobwinner.ch is the only MCP-driven source** — it's a Nuxt SPA that needs the
+MCP `browser` tool to render client-side search results. Raw HTTP against
+jobwinner.ch returns ~10 jobs from the SSR shell; MCP browser returns ~50+.
 
-Rationale: `playwright` is a ~300 MB install; duplicating it per project is
-wasteful on a constrained laptop. If you fork this repo to a fresh host,
-`npm install` will populate `node_modules/` locally.
+## Sources — what's actually used
 
-## Architecture
+| Source | Method (manifest) | What runs | Why |
+|---|---|---|---|
+| jobs.ch | `raw_https` | Built-in `fetch()` / `node:https` against server-rendered HTML | Static site, raw HTTP is fastest |
+| itjobs.ch | `raw_https` | Built-in `fetch()` + HTML regex | Static site |
+| **jobwinner.ch** | **`mcp_browser`** | **MCP `browser_navigate` / `browser_click` / `browser_type` / `browser_wait_for` / `browser_extract`** | SPA — needs JS rendering. Raw HTTP fallback returns SSR shell only. |
+| linkedin | `playwright_fallback` | `chromium` imported directly from `playwright` | Anti-bot wall blocks MCP too |
+| jobscout24.ch | `raw_http_batches` | `node:http` for listing + 10-batch detail fetch | Static site |
+| ictcareer.ch | `raw_https` | Built-in `fetch()` + HTML regex | Listing only (detail = Turnstile-blocked) |
+| jobup.ch | `raw_https` | Built-in `fetch()` ×5 pages + JSON-LD | Static site |
 
-See [`docs/architecture.md`](./docs/architecture.md).
-
-## Security
-
-This is a **public** GitHub repository. **No secrets, credentials, or
-environment-specific details are committed.**
-
-- `secrets.md` is gitignored. Restore from the personalisation backup archive.
-- No email addresses, API keys, gateway tokens, or paths to OpenClaw internals
-  appear in any tracked file.
-- All secrets are read at runtime via env-first / `secrets.md` fallback
-  (`src/utils/secrets.js`).
-
-If you find a security issue, open a GitHub issue with `[SECURITY]` prefix
-or contact the project owner through a non-public channel.
-
-## Sources
-
-| Source | Method | Notes |
-|---|---|---|
-| jobs.ch | MCP `web_fetch` | JSON-LD on listing |
-| itjobs.ch | MCP `web_fetch` | DOM scan |
-| jobwinner.ch | MCP `browser` | SPA search |
-| LinkedIn | Playwright fallback | Anti-bot wall |
-| jobscout24.ch | MCP `web_fetch` + raw HTTP | JSON-LD on detail |
-| ictcareer.ch | MCP `web_fetch` listing only | Detail pages Turnstile-blocked |
-| jobup.ch | MCP `web_fetch` | Inline JSON-LD |
+The `method` field in `sources/manifest.json` reflects the actual implementation
+in `src/sources/<name>.js`. The `methodLegend` block at the top of the manifest
+documents the meaning of each value.
 
 ## Cron
 
@@ -78,7 +63,63 @@ Registered with the OpenClaw gateway as `job-aggregator-v2`:
 - **`enabled`:** `false` (manual trigger from chat, matching the v1 pattern)
 - **Manual trigger:** `cron run --id 100ecddc-38ce-4327-9a08-428fa7c71ba7 --force`
 
-The cron agent reads the README, runs `node src/orchestrate.js`, and reports a brief summary. It does not modify files.
+The cron agent runs in three phases:
+- **Phase A** — runs the orchestrator with `--source=jobs.ch,itjobs.ch,linkedin,jobscout24.ch,ictcareer.ch,jobup.ch --skip-email` to populate `state/v2-sources/*.json` for the 6 raw-HTTP sources
+- **Phase B** — runs the `BROWSER_RECIPE` in `src/sources/jobwinner-ch.js` via the MCP `browser` tool to populate `state/v2-sources/jobwinner.ch.json` with SPA-rendered job links
+- **Phase C** — runs the orchestrator with no args; merges all 7 source files, dedups against `job-history.json`, sends the email via Resend
+
+The MCP `browser` tool is enabled via `tools.alsoAllow: ["web_fetch", "browser"]`
+and a `browser.profiles.openclaw` block in `~/.openclaw/openclaw.json`.
+
+## Security
+
+This is a **public** GitHub repository. **No secrets, credentials, or
+environment-specific details are committed.**
+
+- `secrets.md` is gitignored. Restore from the personalisation backup archive.
+- No email addresses, API keys, gateway tokens, or paths to OpenClaw internals
+  appear in any tracked file.
+- All secrets are read at runtime via env-first / `secrets.md` fallback
+  (`src/utils/secrets.js`).
+- Pre-push verification: `git ls-files | grep -iE 'secret|key|token|credential'`
+  returns empty.
+
+If you find a security issue, open a GitHub issue with `[SECURITY]` prefix
+or contact the project owner through a non-public channel.
+
+## Live test results (2026-08-27, end-to-end full run)
+
+| Source | Method | Count | Time | Notes |
+|---|---|---|---|---|
+| jobs.ch | raw_https | 20 | ~2s | Server-rendered HTML, JSON-LD on detail. |
+| itjobs.ch | raw_https | 30 | ~1.5s | Server-rendered, regex on `<a class="job-details-link">`. |
+| jobwinner.ch | raw HTTP fallback (MCP browser recipe in code) | 10 | ~0.6s | SPA — server-rendered SSR shell exposes the top 10 only. Full ~50+ requires MCP browser path. |
+| linkedin | playwright_fallback | 360 | ~66s | 6 keywords serial. |
+| jobscout24.ch | raw_http_batches | 12-13 | ~1s | Two-phase scrape. |
+| ictcareer.ch | raw_https | 27 | ~1.3s | Listing only (detail = Turnstile-blocked). |
+| jobup.ch | raw_https | 99 | ~0.7s | 5 pages. |
+| **Total raw** | | **~558** | **~73s** | |
+| **PM-filtered** | | **~278** | | Restrictive default — only PM-positive titles. |
+
+End-to-end live email sent: **278 jobs delivered to the configured recipient**, Resend msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`. (Recipient address lives in `secrets.md`, not in tracked files.)
+
+## Known follow-ups
+
+- **jobwinner.ch via cron agent turn.** The MCP browser recipe runs when the
+  cron agent invokes `src/sources/jobwinner-ch.js` via `ctx.browser`. To verify
+  the full path works, force-run the cron and check `state/v2-sources/jobwinner.ch.json`
+  has ~50+ jobs (vs ~10 from the CLI fallback).
+- **German PM titles missed by the filter.** jobscout24.ch returns "Produktmanager"
+  (German) which doesn't match `\bproduct\s+manager\b`. Per Sam's call: job-accuracy
+  > flag-accuracy. Not blocking.
+- **German umlauts are mojibake in the JSON output** (`BA�lach` for `Bällach`,
+  etc.). Caused by Node's text-decoding somewhere — needs investigation. Email
+  still readable; doesn't break parsing.
+- **Linkedin descSnippet is empty** until detail enrichment pass runs. Jobs
+  without description text get `germanRequired: false` always. Enrichment is
+  next-step.
+- **jobs.ch date range goes back ~4 weeks.** Cutoff is 14 days, but jobs.ch
+  lists older roles with "4 weeks ago" badges. May want to tune `CUTOFF_DAYS`.
 
 ## Roadmap
 
@@ -88,38 +129,9 @@ The cron agent reads the README, runs `node src/orchestrate.js`, and reports a b
 - [x] **Phase 4** — End-to-end dry-run (catches ctx.manifest contract drift)
 - [x] **Phase 5** — Live send test (jobs.ch, Resend msgId `0a5c38dc-f9c5-45f0-b433-89895b572d48`, 10 jobs delivered)
 - [x] **Phase 6** — Cron registration + first push to public GitHub repo
-
-## Live test results (2026-08-27, end-to-end full run)
-
-| Source | Method | Count | Time | Notes |
-|---|---|---|---|---|
-| jobs.ch | raw `node:https` | 20 | ~2s | Server-rendered HTML, JSON-LD on detail. |
-| itjobs.ch | built-in `fetch()` | 30 | ~1.5s | Server-rendered, regex on `<a class="job-details-link">`. |
-| jobwinner.ch | raw HTTP fallback (MCP browser recipe in code) | 10 | ~0.6s | SPA — server-rendered SSR shell exposes the top 10 only. |
-| linkedin | Playwright subprocess | 360 | ~66s | 6 keywords serial. |
-| jobscout24.ch | raw `node:http` (listing) + JSON-LD regex (detail) | 12-13 | ~1s | Two-phase scrape. |
-| ictcareer.ch | built-in `fetch()` | 27 | ~1.3s | Listing only (detail = Turnstile-blocked). |
-| jobup.ch | built-in `fetch()` + JSON-LD | 99 | ~0.7s | 5 pages. |
-| **Total raw** | | **~558** | **~73s** | |
-| **PM-filtered** | | **~278** | | Restrictive default — only PM-positive titles. |
-
-End-to-end live email sent: **278 jobs delivered to sam.premium.token@gmail.com, Resend msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`**.
-
-## Known follow-ups
-
-- **German PM titles missed by the filter.** jobscout24.ch returns "Produktmanager" (German) which doesn't match `\bproduct\s+manager\b`. Per Sam's call: job-accuracy > flag-accuracy. Not blocking.
-- **MCP architecture gap.** All sources currently use raw HTTP because the standalone CLI doesn't have access to the MCP `web_fetch` / `browser` tools (those are exposed only in agent-turn contexts). The MCP browser recipe for jobwinner.ch is documented in code as a constant; an agent turn can execute it.
-- **jobwinner.ch SPA limit.** Only the top 10 server-rendered jobs are reachable via raw HTTP. Full coverage requires the MCP browser path.
-- **jobs.ch title fix landed** — the title is now pulled from the `<span class="...lc_4...">` element directly, not from line-split of stripped text.
-- **German umlauts are mojibake in the JSON output** (`BA�lach` for `Bällach`, etc.). Caused by Node's text-decoding somewhere — needs investigation. Email still readable; doesn't break parsing.
-- **Linkedin descSnippet is empty** until detail enrichment pass runs. Jobs without description text get `germanRequired: false` always. Enrichment is documented as next-step.
-
-## Known follow-ups (not blockers)
-
-- jobs.ch title field is concatenated (multi-field string). Caused by the listing-card `<a>` wrapping multiple `<div>`s without `<br>`s between them. Fix: parse the `<span class="...lc_4">` title element directly instead of splitting card text. Link/company/location/date all parse correctly.
-- 6 remaining sources (`itjobs.ch`, `jobwinner.ch`, `linkedin.js`, `jobscout24.ch`, `ictcareer.ch`, `jobup.ch`) have not been live-tested yet. Phase 2/3 only verified `node --check` + per-source dry-run on jobs.ch.
-- jobs.ch date range goes back ~4 weeks (cutoff is 14 days, but jobs.ch lists older roles with "4 weeks ago" badges). May want to tune `CUTOFF_DAYS` if too many stale jobs come through.
-- `node_modules/` is a Windows junction to `~/.openclaw/workspace/scripts/node_modules/` (the v1 scripts dir). If forking to a fresh host, run `npm install` to replace the junction with a real `node_modules/`.
+- [x] **Phase 7** — All 7 sources fixed and live-tested (Resend msgId `c27ad7f1-48e3-4f05-b934-63bcbb84d28e`, 278 PM jobs delivered)
+- [x] **Phase 8** — Manifest + README aligned with actual MCP usage (jobwinner.ch = mcp_browser, all others = raw_http*)
+- [ ] **Phase 9** — Verify cron agent turn actually exercises jobwinner.ch via MCP browser (next manual trigger)
 
 ## License
 

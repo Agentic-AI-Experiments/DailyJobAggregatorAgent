@@ -93,20 +93,30 @@ export default async function scrape(ctx) {
 
   const jobs = [];
 
-  // Path 1: MCP browser if available
+  // Path 1: MCP browser (PRIMARY when ctx.browser is provided — i.e. cron agent turn).
+  // Jobwinner.ch is a Nuxt SPA; raw HTTP only sees the SSR shell (~10 jobs).
+  // MCP browser drives the SPA's client-side rendering and extracts ~50+.
   if (typeof ctx.browser === 'function') {
-    log('info', 'jobwinner.ch using MCP browser recipe');
+    log('info', 'jobwinner.ch using MCP browser (primary path)');
     try {
       for (const step of BROWSER_RECIPE) {
         await ctx.browser(step.tool, step.args);
       }
-      const links = (await ctx.browser('browser_extract', { selector: 'a[href*="/en/job/"]' })) || [];
+      const extract = await ctx.browser('browser_extract', {
+        selector: 'a[href*="/en/job/"]',
+        fields: ['href', 'innerText'],
+      });
+      const links = Array.isArray(extract) ? extract : (extract && extract.results) || [];
+      log('info', 'jobwinner.ch browser_extract returned', { count: links.length });
+      const today = new Date().toISOString().split('T')[0];
       for (const item of links.slice(0, MAX_LINKS)) {
         const text = stripHtml(item.innerText || item.text || '');
         if (!text || text.length < 3) continue;
-        const today = new Date().toISOString().split('T')[0];
+        // The MCP browser extract may also surface the company name as a sibling
+        // element; if the orchestrator's browser MCP returns it, use it.
+        const company = stripHtml(item.company || '');
         jobs.push({
-          company: 'Unknown',
+          company: company || 'Unknown',
           title: text.slice(0, 200),
           location: 'Switzerland',
           datePosted: today, // TODO(fix-ticket): date badge unreliable
@@ -116,13 +126,15 @@ export default async function scrape(ctx) {
         });
       }
     } catch (e) {
-      log('error', 'jobwinner.ch browser recipe failed', { error: e.message });
+      log('error', 'jobwinner.ch browser recipe failed; falling back to raw HTTP', { error: e.message });
     }
   }
 
-  // Path 2: raw HTTP fallback
+  // Path 2: raw HTTP fallback. Used when:
+  //   - CLI invocation (no ctx.browser)
+  //   - MCP browser failed and jobs.length === 0
   if (jobs.length === 0) {
-    log('info', 'jobwinner.ch using raw-HTTP fallback');
+    log('info', 'jobwinner.ch using raw-HTTP fallback (SSR shell only; expect ~10 jobs)');
     try {
       const html = await fetchRawHtml(baseUrl);
       const links = extractJobLinks(html);
