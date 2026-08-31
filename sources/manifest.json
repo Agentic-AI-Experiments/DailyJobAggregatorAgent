@@ -5,7 +5,7 @@
     "raw_https": "Built-in Node fetch() or node:https against server-rendered HTML. No MCP. Used when the site returns full data without JS rendering.",
     "raw_http_batches": "Raw node:http for listing + raw node:http in 10-batch for detail pages. No MCP. Used when detail pages have JSON-LD that needs to be fetched in parallel.",
     "playwright_fallback": "Imports chromium from 'playwright' directly. Real Chromium browser. Used when the site blocks raw HTTP (anti-bot). NOT via MCP browser tool.",
-    "mcp_browser": "MCP browser MCP tool (browser_navigate, browser_click, etc.). Used when the site is an SPA that needs JS rendering. Only fires when invoked from a cron agent turn; CLI invocation falls back to raw HTTP (see source code)."
+    "raw_http_with_browser_recipe": "Raw HTTP/Playwright by default; an MCP-browser recipe is available for agent turns where the browser tool is in toolsAllow. CLI invocation always uses the raw path."
   },
   "defaultTimeoutMs": 90000,
   "defaultCutoffDays": 14,
@@ -33,12 +33,12 @@
     {
       "name": "jobwinner.ch",
       "module": "src/sources/jobwinner-ch.js",
-      "method": "mcp_browser",
+      "method": "raw_http_with_browser_recipe",
       "enabled": true,
       "searchUrl": "https://www.jobwinner.ch/en/jobs?q=product+manager",
       "timeoutMs": 120000,
       "needsDetailEnrichment": false,
-      "notes": "SPA — MCP browser (browser_navigate / browser_type / browser_wait_for / browser_extract) is the primary path. Raw HTTP fallback returns the SSR shell only (~10 jobs vs full ~50+). The BROWSER_RECIPE constant in the source module is invoked when ctx.browser is provided (cron agent turn). CLI runs use raw HTTP fallback.",
+      "notes": "SPA — raw-HTTP path (Nuxt SSR shell) returns ~10 jobs and is the default; MCP browser recipe returns ~50 jobs but requires 6 browser() tool calls from inside an agent turn (see scripts/jobwinner-mcp.js). scripts/run-aggregator.js handles both paths automatically — pass --browser-jobwinner from a cron agent turn to upgrade.",
       "browserRecipe": [
         { "tool": "browser_navigate", "args": { "url": "https://www.jobwinner.ch/en/jobs" } },
         { "tool": "browser_wait_for", "args": { "text": "Accept", "timeoutMs": 60000 } },
