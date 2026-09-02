@@ -1,9 +1,9 @@
 # DailyJobAggregatorAgent
 
-A Switzerland-focused product-manager job aggregator. Scrapes 7 sources in
+A Switzerland-focused product-manager job aggregator. Scrapes 9 sources in
 parallel, filters to PM roles, dedups against history, and emails a daily digest.
 
-> **Status:** Phases 1–10 complete. End-to-end live run delivers ~280 PM jobs per
+> **Status:** Phases 1–11 complete. End-to-end live run delivers ~280 PM jobs per
 > invocation. See [`docs/architecture.md`](./docs/architecture.md) and the
 > live test results below.
 
@@ -60,6 +60,10 @@ Run all three in sequence via `scripts/run-pipeline.js` (one exec), OR spawn the
 | jobscout24.ch | `raw_http_batches` | Child process. `node:http` for listing + 10-batch detail fetch. | Static site |
 | ictcareer.ch | `raw_https` | Child process. Listing only (detail = Turnstile-blocked). | Static site |
 | jobup.ch | `raw_https` | Child process. 5 pages + JSON-LD. | Static site |
+| **hn-whose-hiring** (added 2026-09-02) | `raw_https` | Child process. Pure HTTP via `hn.algolia.com` — discover current month's "Who's hiring?" thread, then fetch PM-tagged comments. No Playwright. | Startup / community segment that traditional boards under-represent. PM density ~6/month. |
+| **yc-directory-rss** (added 2026-09-02) | `raw_https` | **STUB — returns empty jobs.** YC Work at a Startup. Algolia + CSRF under the hood. RSS endpoint not yet verified. See `src/sources/yc-directory-rss.js` header. | Highest potential startup-PM density. Implementation blocked on RSS / CSRF verification. |
+
+Deferred sources (Reddit, WAA proper, Sequoia/a16z): see [`docs/SOURCES-TODO.md`](./docs/SOURCES-TODO.md).
 
 The `method` field in `sources/manifest.json` reflects the actual implementation
 in `src/sources/<name>.js`. The `methodLegend` block at the top of the manifest

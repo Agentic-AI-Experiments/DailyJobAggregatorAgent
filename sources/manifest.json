@@ -101,6 +101,26 @@
       "timeoutMs": 60000,
       "needsDetailEnrichment": false,
       "notes": "Server-rendered HTML, inline JobPosting JSON-LD. 5 pages × 20 postings. descSnippet is teaser only — German detection limited."
+    },
+    {
+      "name": "hn-whose-hiring",
+      "module": "src/sources/hn-whose-hiring.js",
+      "method": "raw_https",
+      "enabled": true,
+      "searchUrl": "https://hn.algolia.com/api/v1/search_by_date?query=Ask+HN:+Who+is+hiring%3F&tags=story&hitsPerPage=10",
+      "timeoutMs": 30000,
+      "needsDetailEnrichment": false,
+      "notes": "Added 2026-09-02. Two-step: discover current month's thread id via search_by_date, then fetch PM-tagged comments. Pure HTTP, no Playwright. PM relevance filter applied downstream; geo filter (Switzerland + EU-remote, soft) applied in src/filters/index.js."
+    },
+    {
+      "name": "yc-directory-rss",
+      "module": "src/sources/yc-directory-rss.js",
+      "method": "raw_https",
+      "enabled": true,
+      "searchUrl": "https://www.workatastartup.com/companies.rss",
+      "timeoutMs": 15000,
+      "needsDetailEnrichment": false,
+      "notes": "STUB (added 2026-09-02). YC Work at a Startup. Algolia + CSRF under the hood — public JSON endpoint requires session cookie. RSS endpoint NOT YET VERIFIED — see src/sources/yc-directory-rss.js header for curl checks + github.com/rayhanadev/yc-waas-api reverse-engineering notes. Returns empty jobs until implemented."
     }
   ]
 }

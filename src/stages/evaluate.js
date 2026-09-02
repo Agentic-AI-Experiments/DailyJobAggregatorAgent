@@ -1,8 +1,13 @@
 // scripts/evaluate.js — Stage 1 of post-merge pipeline
 //
-// Loads all 7 state/v2-sources/*.json files, applies PM fit + German-language
+// Loads all 9 state/v2-sources/*.json files, applies PM fit + German-language
 // flags, and rates each job's PM fit (0-10) using the description snippet +
 // title. Writes state/evaluated-jobs.json. Pure offline — no network calls.
+//
+// Note (2026-09-02): Geographic scope filter (Switzerland + EU-remote, soft)
+// runs upstream in applyFilters (src/filters/index.js). By the time jobs reach
+// this stage they've already been geo-filtered, so rateFit doesn't need to
+// re-check geography. Keep this note in sync if the filter pipeline changes.
 //
 // Input:  state/v2-sources/*.json
 // Output: state/evaluated-jobs.json
