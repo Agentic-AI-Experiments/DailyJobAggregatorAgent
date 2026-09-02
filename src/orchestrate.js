@@ -25,7 +25,13 @@ import { log } from './utils/log.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const STATE_DIR = path.join(PROJECT_ROOT, 'state');
+// STATE_DIR lives OUTSIDE the project on purpose: keeps v2's run history
+// isolated from any other process that might write into ./state/, and lets
+// the daily-backup tarball treat it as a single named blob without scanning
+// the repo. Override with JOB_AGGREGATOR_STATE_DIR (used by tests).
+const STATE_DIR = process.env.JOB_AGGREGATOR_STATE_DIR
+  ? path.resolve(process.env.JOB_AGGREGATOR_STATE_DIR)
+  : path.resolve(process.env.USERPROFILE || process.env.HOME, '.openclaw', 'job-aggregator-v2-state');
 const MANIFEST_PATH = path.join(PROJECT_ROOT, 'sources', 'manifest.json');
 const HISTORY_FILE = path.join(STATE_DIR, 'job-history.json');
 const NEW_JOBS_FILE = path.join(STATE_DIR, 'new-jobs.json');

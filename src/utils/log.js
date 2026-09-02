@@ -21,8 +21,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // src/utils/log.js → ../../ = project root, then state/run-<ts>.jsonl.
+// Mirrors src/orchestrate.js: STATE_DIR is project-external by default,
+// overrideable via JOB_AGGREGATOR_STATE_DIR.
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
-const STATE_DIR = path.join(PROJECT_ROOT, 'state');
+const STATE_DIR = process.env.JOB_AGGREGATOR_STATE_DIR
+  ? path.resolve(process.env.JOB_AGGREGATOR_STATE_DIR)
+  : path.resolve(process.env.USERPROFILE || process.env.HOME, '.openclaw', 'job-aggregator-v2-state');
 
 // One file per process. Computed lazily so the timestamp reflects the first
 // log() call, not module load (which may happen well before the run starts).

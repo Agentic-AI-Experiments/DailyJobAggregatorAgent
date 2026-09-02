@@ -24,6 +24,10 @@ import { renderDigest } from '../src/email/template.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+// Per-test temp STATE dir (lives outside the project on purpose — see
+// src/orchestrate.js for the new STATE_DIR contract).
+const TEST_STATE = fs.mkdtempSync(path.join(os.tmpdir(), 'job-aggregator-v2-test-state-'));
+process.env.JOB_AGGREGATOR_STATE_DIR = TEST_STATE;
 
 let pass = 0, fail = 0;
 
@@ -106,10 +110,9 @@ console.log('\nrenderDigest: German-required column:');
 console.log('\nmailer dry-run: 0 new jobs:');
 {
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mailer-test-'));
-  // The mailer resolves PROJECT via __dirname, not cwd. So we must run it
-  // from the project root with a fixture in state/. To keep tests isolated,
-  // we back up the real new-jobs.json, write a 0-job fixture, run, restore.
-  const STATE = path.join(PROJECT_ROOT, 'state');
+  // Mailer resolves STATE_DIR from JOB_AGGREGATOR_STATE_DIR (set above).
+  // Fixtures live in the per-test temp dir; nothing touches project/state/.
+  const STATE = TEST_STATE;
   const TARGET = path.join(STATE, 'new-jobs.json');
   const BACKUP = path.join(TMP, 'new-jobs.json.backup');
   if (fs.existsSync(TARGET)) fs.copyFileSync(TARGET, BACKUP);
@@ -122,6 +125,7 @@ console.log('\nmailer dry-run: 0 new jobs:');
     }));
     const r = spawnSync('node', ['src/stages/mailer.js', '--dry-run'], {
       cwd: PROJECT_ROOT,
+      env: { ...process.env, JOB_AGGREGATOR_STATE_DIR: TEST_STATE },
       encoding: 'utf8',
     });
     check('exits 0 on 0 new jobs', r.status, 0);
@@ -138,7 +142,7 @@ console.log('\nmailer dry-run: 0 new jobs:');
 console.log('\nmailer dry-run: N new jobs (skips email):');
 {
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mailer-test-'));
-  const STATE = path.join(PROJECT_ROOT, 'state');
+  const STATE = TEST_STATE;
   const TARGET = path.join(STATE, 'new-jobs.json');
   const BACKUP = path.join(TMP, 'new-jobs.json.backup');
   if (fs.existsSync(TARGET)) fs.copyFileSync(TARGET, BACKUP);
@@ -151,6 +155,7 @@ console.log('\nmailer dry-run: N new jobs (skips email):');
     }));
     const r = spawnSync('node', ['src/stages/mailer.js', '--dry-run'], {
       cwd: PROJECT_ROOT,
+      env: { ...process.env, JOB_AGGREGATOR_STATE_DIR: TEST_STATE },
       encoding: 'utf8',
     });
     check('exits 0 with N jobs', r.status, 0);
@@ -167,7 +172,7 @@ console.log('\nmailer dry-run: N new jobs (skips email):');
 console.log('\nmailer: missing new-jobs.json:');
 {
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mailer-test-'));
-  const STATE = path.join(PROJECT_ROOT, 'state');
+  const STATE = TEST_STATE;
   const TARGET = path.join(STATE, 'new-jobs.json');
   const BACKUP = path.join(TMP, 'new-jobs.json.backup');
   if (fs.existsSync(TARGET)) fs.copyFileSync(TARGET, BACKUP);
@@ -176,6 +181,7 @@ console.log('\nmailer: missing new-jobs.json:');
     if (fs.existsSync(TARGET)) fs.unlinkSync(TARGET);
     const r = spawnSync('node', ['src/stages/mailer.js', '--dry-run'], {
       cwd: PROJECT_ROOT,
+      env: { ...process.env, JOB_AGGREGATOR_STATE_DIR: TEST_STATE },
       encoding: 'utf8',
     });
     check('exits 1 on missing new-jobs.json', r.status, 1);

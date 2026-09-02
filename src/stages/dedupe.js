@@ -22,7 +22,11 @@ import { jobFingerprint } from '../utils/fingerprint.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT = path.resolve(__dirname, '..', '..');
-const STATE_DIR = path.join(PROJECT, 'state');
+// Mirrors src/orchestrate.js: STATE_DIR is project-external by default,
+// overrideable via JOB_AGGREGATOR_STATE_DIR.
+const STATE_DIR = process.env.JOB_AGGREGATOR_STATE_DIR
+  ? path.resolve(process.env.JOB_AGGREGATOR_STATE_DIR)
+  : path.resolve(process.env.USERPROFILE || process.env.HOME, '.openclaw', 'job-aggregator-v2-state');
 const EVALUATED_FILE = path.join(STATE_DIR, 'evaluated-jobs.json');
 const NEW_JOBS_FILE = path.join(STATE_DIR, 'new-jobs.json');
 const HISTORY_FILE = path.join(STATE_DIR, 'job-history.json');

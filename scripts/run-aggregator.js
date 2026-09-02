@@ -41,6 +41,9 @@ const RAW_HTTPS_SOURCES = [
   'ictcareer.ch',
   'jobup.ch',
   'jobwinner.ch',
+  'hn-whose-hiring',
+  // yc-directory-rss is excluded: it's a stub (returns empty jobs). Don't
+  // spend 15s on an HTTP call per cron run for a no-op.
 ];
 
 const ARGS = new Set(process.argv.slice(2));
